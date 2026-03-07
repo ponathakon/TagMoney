@@ -1,18 +1,35 @@
 import { WalletSelector } from '@/components/WalletSelector';
 import { Category, INITIAL_CATEGORIES } from '@/constants/categories';
 import { getCurrencyByCode } from '@/constants/currencies';
-import { Colors } from '@/constants/theme';
 import { useLanguage } from '@/context/LanguageContext';
 import { TranslationKeys } from '@/i18n';
 import { getCategories, getCurrency, getData, getWalletBalance, getWallets, saveCategories, StorageKeys, updateTransaction } from '@/utils/storage';
 import { Transaction, Wallet } from '@/utils/types';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import Animated, { FadeInDown, SlideInDown, SlideOutDown } from 'react-native-reanimated';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+    Alert,
+    Dimensions,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    PanResponder,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View
+} from 'react-native';
+import Animated, { FadeInDown, SlideInDown, SlideOutDown, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Helper to format date display
 const formatDate = (date: Date, t?: any, languageCode: string = 'en-US'): string => {
@@ -29,7 +46,7 @@ const formatDate = (date: Date, t?: any, languageCode: string = 'en-US'): string
 // Simple calculator evaluation
 const evaluateExpression = (expr: string): number | null => {
     try {
-        const sanitized = expr.replace(/×/g, '*').replace(/÷/g, '/');
+        const sanitized = expr.replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-');
         if (!/^[\d+\-*/.\s]+$/.test(sanitized)) return null;
         const result = new Function('return ' + sanitized)();
         return typeof result === 'number' && isFinite(result) ? result : null;
@@ -45,6 +62,8 @@ export default function EditTransaction() {
     const { t, languageCode } = useLanguage();
 
     const [loading, setLoading] = useState(true);
+
+    // Form state
     const [amount, setAmount] = useState('');
     const [type, setType] = useState<'income' | 'expense'>('expense');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -52,7 +71,51 @@ export default function EditTransaction() {
     const [description, setDescription] = useState('');
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showCategoryModal, setShowCategoryModal] = useState(false);
 
+    // Calculator Keyboard State
+    const [showCalcKeyboard, setShowCalcKeyboard] = useState(false);
+    const amountInputRef = useRef<TextInput>(null);
+
+    // Calculator Swipe Gestures
+    const calcTranslateY = useSharedValue(0);
+    const CALC_KEYBOARD_HEIGHT = 340 + insets.bottom; // Approximate height
+
+    const calcAnimatedStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: calcTranslateY.value }],
+    }));
+
+    const calcPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: (_, gestureState) => {
+                return Math.abs(gestureState.dy) > 10;
+            },
+            onPanResponderMove: (_, gestureState) => {
+                if (gestureState.dy > 0) {
+                    calcTranslateY.value = gestureState.dy;
+                }
+            },
+            onPanResponderRelease: (_, gestureState) => {
+                if (gestureState.dy > CALC_KEYBOARD_HEIGHT * 0.3 || gestureState.vy > 1.5) {
+                    calcTranslateY.value = withTiming(CALC_KEYBOARD_HEIGHT, { duration: 250 });
+                    setTimeout(() => {
+                        setShowCalcKeyboard(false);
+                        Keyboard.dismiss();
+                        // Reset on next tick so component is unmounted first
+                        setTimeout(() => { calcTranslateY.value = 0; }, 50);
+                    }, 250);
+                } else {
+                    calcTranslateY.value = withSpring(0, {
+                        damping: 20,
+                        stiffness: 200,
+                    });
+                }
+            },
+        })
+    ).current;
+
+    // Data state
     const [allCategories, setAllCategories] = useState<Category[]>([]);
     const [wallets, setWallets] = useState<Wallet[]>([]);
     const [walletBalances, setWalletBalances] = useState<Record<string, number>>({});
@@ -60,6 +123,13 @@ export default function EditTransaction() {
 
     useEffect(() => {
         loadData();
+
+        const kbDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+            setShowCalcKeyboard(false);
+        });
+        return () => {
+            kbDidShowListener.remove();
+        };
     }, [id]);
 
     const loadData = async () => {
@@ -75,7 +145,6 @@ export default function EditTransaction() {
         const walletsData = await getWallets();
         setWallets(walletsData);
 
-        // Load balances for all wallets
         const balances: Record<string, number> = {};
         for (const wallet of walletsData) {
             balances[wallet.id] = await getWalletBalance(wallet.id);
@@ -105,9 +174,45 @@ export default function EditTransaction() {
 
     const categories = allCategories.filter(c => c.type === type);
 
-    const insertOperator = (op: string) => {
-        if (amount && !amount.endsWith('+') && !amount.endsWith('-') && !amount.endsWith('×') && !amount.endsWith('÷')) {
-            setAmount(prev => prev + op);
+    // Calculator Actions
+    const handleNumberPress = (num: string) => {
+        setAmount(prev => {
+            if (prev === '0' && num !== '.') return num;
+            if (num === '.') {
+                const parts = prev.split(/[+\-×÷]/);
+                const lastPart = parts[parts.length - 1];
+                if (lastPart.includes('.')) return prev;
+            }
+            return prev + num;
+        });
+    };
+
+    const handleOperatorPress = (op: string) => {
+        setAmount(prev => {
+            if (!prev) return '0' + op;
+            const lastChar = prev[prev.length - 1];
+            if (['+', '−', '×', '÷'].includes(lastChar)) {
+                return prev.slice(0, -1) + op;
+            }
+            return prev + op;
+        });
+    };
+
+    const handleBackspace = () => {
+        setAmount(prev => {
+            if (prev.length <= 1) return '';
+            return prev.slice(0, -1);
+        });
+    };
+
+    const handleClear = () => {
+        setAmount('');
+    };
+
+    const dismissCalculator = () => {
+        setShowCalcKeyboard(false);
+        if (amountInputRef.current) {
+            amountInputRef.current.blur();
         }
     };
 
@@ -158,163 +263,148 @@ export default function EditTransaction() {
 
     if (loading) return <View style={styles.container} />;
 
-    const calculatedDisplay = amount.includes('+') || amount.includes('-') || amount.includes('×') || amount.includes('÷')
-        ? getCalculatedAmount()
-        : null;
+    const hasExpression = amount.includes('+') || amount.includes('−') || amount.includes('×') || amount.includes('÷');
+    const calculatedDisplay = hasExpression ? getCalculatedAmount() : null;
+
+    const headerColor = type === 'income' ? '#10B981' : '#EF4444';
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
-            {/* Header */}
-            <View style={styles.header}>
-                <View style={{ width: 40 }} />
-                <Text style={styles.headerTitle}>{t('edit_transaction')}</Text>
-                <TouchableOpacity
-                    onPress={() => router.back()}
-                    style={styles.headerCloseBtn}
-                >
-                    <Ionicons name="close" size={24} color="#8B5CF6" />
-                </TouchableOpacity>
+        <KeyboardAvoidingView
+            style={styles.container}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+            {/* Custom Header Area */}
+            <View style={[styles.topHeader, { paddingTop: insets.top + 10 }]}>
+                <View style={styles.topNav}>
+                    <View style={{ width: 44 }} />
+                    <Text style={styles.navTitle}>{t('edit_transaction')}</Text>
+                    <TouchableOpacity onPress={() => router.back()} style={styles.navBtn}>
+                        <Ionicons name="close" size={24} color="#6366F1" />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Amount Display */}
+                <View style={styles.amountArea}>
+                    <View style={[styles.typeBadge, { backgroundColor: headerColor + '15' }]}>
+                        <Text style={[styles.typeBadgeText, { color: headerColor }]}>
+                            {type === 'income' ? t('income') : t('expense')}
+                        </Text>
+                    </View>
+                    <TouchableOpacity
+                        style={styles.amountInputWrapper}
+                        activeOpacity={1}
+                        onPress={() => {
+                            Keyboard.dismiss();
+                            setShowCalcKeyboard(true);
+                            amountInputRef.current?.focus();
+                        }}
+                    >
+                        <Text style={[styles.currencySymbolLarge, { color: headerColor }, !amount && { opacity: 0.4 }]}>{currencySymbol}</Text>
+                        <TextInput
+                            ref={amountInputRef}
+                            style={[styles.amountInputLarge, { color: headerColor }]}
+                            value={amount}
+                            onChangeText={setAmount}
+                            placeholder="0"
+                            placeholderTextColor={headerColor + '60'}
+                            showSoftInputOnFocus={false}
+                            onFocus={() => {
+                                Keyboard.dismiss();
+                                setShowCalcKeyboard(true);
+                            }}
+                        />
+                    </TouchableOpacity>
+                    {calculatedDisplay !== null ? (
+                        <Animated.View entering={FadeInDown.duration(200)}>
+                            <Text style={styles.calculatedPreviewTop}>
+                                = {currencySymbol}{calculatedDisplay.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </Text>
+                        </Animated.View>
+                    ) : (
+                        <View style={{ height: 28, marginTop: 4 }} />
+                    )}
+                </View>
             </View>
 
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                style={{ flex: 1 }}
-                keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
+            <Animated.ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={{ paddingBottom: showCalcKeyboard ? 340 : insets.bottom + 100 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                onScrollBeginDrag={() => {
+                    Keyboard.dismiss();
+                    setShowCalcKeyboard(false);
+                }}
             >
-                <Animated.ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
+                <View style={styles.formContent}>
+
                     {/* Type Selector */}
-                    <Animated.View entering={FadeInDown.delay(100).springify()} style={styles.typeSelector}>
+                    <View style={styles.typeSelectorContainer}>
                         <TouchableOpacity
-                            style={[styles.typeButton, type === 'income' && styles.activeIncome]}
-                            onPress={() => { setType('income'); setSelectedCategory(null); }}
-                        >
-                            <Text style={[styles.typeText, type === 'income' && styles.activeText]}>{t('income')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.typeButton, type === 'expense' && styles.activeExpense]}
+                            style={[styles.typeBtn, type === 'expense' && styles.typeBtnExpenseActive]}
                             onPress={() => { setType('expense'); setSelectedCategory(null); }}
                         >
-                            <Text style={[styles.typeText, type === 'expense' && styles.activeText]}>{t('expense')}</Text>
+                            <Text style={[styles.typeBtnText, type === 'expense' && styles.typeBtnTextActive]}>{t('expense')}</Text>
                         </TouchableOpacity>
-                    </Animated.View>
-
-                    {/* Amount Input with Calculator */}
-                    <Animated.View entering={FadeInDown.delay(150).springify()} style={styles.inputSection}>
-                        <Text style={styles.label}>{t('amount')}</Text>
-                        <View style={styles.amountContainer}>
-                            <Text style={styles.currencySymbol}>{currencySymbol}</Text>
-                            <TextInput
-                                style={styles.amountInput}
-                                value={amount}
-                                onChangeText={setAmount}
-                                keyboardType="numeric"
-                                placeholder="0.00"
-                                placeholderTextColor="#ccc"
-                            />
-                        </View>
-                        {calculatedDisplay !== null && (
-                            <Text style={styles.calculatedPreview}>= {currencySymbol}{calculatedDisplay.toFixed(2)}</Text>
-                        )}
-                        <View style={styles.calculatorRow}>
-                            <TouchableOpacity style={styles.calcBtn} onPress={() => insertOperator('+')}>
-                                <Text style={styles.calcBtnText}>+</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.calcBtn} onPress={() => insertOperator('-')}>
-                                <Text style={styles.calcBtnText}>−</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.calcBtn} onPress={() => insertOperator('×')}>
-                                <Text style={styles.calcBtnText}>×</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.calcBtn} onPress={() => insertOperator('÷')}>
-                                <Text style={styles.calcBtnText}>÷</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.calcBtn} onPress={() => setAmount('')}>
-                                <Ionicons name="backspace-outline" size={20} color="#666" />
-                            </TouchableOpacity>
-                        </View>
-                    </Animated.View>
+                        <TouchableOpacity
+                            style={[styles.typeBtn, type === 'income' && styles.typeBtnIncomeActive]}
+                            onPress={() => { setType('income'); setSelectedCategory(null); }}
+                        >
+                            <Text style={[styles.typeBtnText, type === 'income' && styles.typeBtnTextActive]}>{t('income')}</Text>
+                        </TouchableOpacity>
+                    </View>
 
                     {/* Date Picker */}
-                    <Animated.View entering={FadeInDown.delay(200).springify()} style={styles.inputSection}>
+                    <View style={styles.inputGroup}>
                         <Text style={styles.label}>{t('date')}</Text>
-                        <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
-                            <Ionicons name="calendar-outline" size={20} color={Colors.light.tint} />
-                            <Text style={styles.dateText}>{formatDate(selectedDate, t, languageCode)}</Text>
-                            <Ionicons name="chevron-forward" size={18} color="#999" />
+                        <TouchableOpacity style={styles.inputCard} onPress={() => setShowDatePicker(true)}>
+                            <Ionicons name="calendar-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                            <Text style={styles.inputText}>{formatDate(selectedDate, t, languageCode)}</Text>
+                            <Ionicons name="chevron-down" size={18} color="#94A3B8" />
                         </TouchableOpacity>
-                    </Animated.View>
-
-                    {Platform.OS === 'ios' ? (
-                        <Modal visible={showDatePicker} transparent animationType="fade">
-                            <View style={styles.modalOverlay}>
-                                <Animated.View
-                                    entering={SlideInDown.duration(300)}
-                                    exiting={SlideOutDown.duration(200)}
-                                    style={styles.modalContent}
-                                >
-                                    <View style={styles.modalHeader}>
-                                        <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                            <Text style={styles.modalCancel}>{t('cancel')}</Text>
-                                        </TouchableOpacity>
-                                        <Text style={styles.modalTitle}>{t('select_date')}</Text>                                        <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                            <Text style={styles.modalDone}>{t('done')}</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                    <DateTimePicker
-                                        value={selectedDate}
-                                        mode="date"
-                                        display="spinner"
-                                        onChange={handleDateChange}
-                                        maximumDate={new Date()}
-                                    />
-                                </Animated.View>
-                            </View>
-                        </Modal>
-                    ) : (
-                        showDatePicker && (
-                            <DateTimePicker
-                                value={selectedDate}
-                                mode="date"
-                                display="default"
-                                onChange={handleDateChange}
-                                maximumDate={new Date()}
-                            />
-                        )
-                    )}
+                    </View>
 
                     {/* Category Selection */}
-                    <Animated.View entering={FadeInDown.delay(250).springify()}>
-                        <View style={styles.categoryHeader}>
+                    <View style={styles.inputGroup}>
+                        <View style={styles.labelRow}>
                             <Text style={styles.label}>{t('category')}</Text>
-                            <TouchableOpacity onPress={() => router.push('/(authenticated)/task/categories')}>
+                            <TouchableOpacity onPress={() => router.push('/task/categories')}>
                                 <Text style={styles.manageBtn}>{t('manage')}</Text>
                             </TouchableOpacity>
                         </View>
-                        <View style={styles.categoryGrid}>
-                            {categories.map((cat) => (
-                                <TouchableOpacity
-                                    key={cat.id}
-                                    style={[
-                                        styles.categoryItem,
-                                        selectedCategory === cat.id && styles.categoryItemActive,
-                                        selectedCategory === cat.id && { backgroundColor: cat.color + '20', borderColor: cat.color }
-                                    ]}
-                                    onPress={() => setSelectedCategory(cat.id)}
-                                >
-                                    <View style={[styles.iconCircle, { backgroundColor: cat.color + '20' }]}>
-                                        <Ionicons name={cat.icon} size={24} color={cat.color} />
+                        <TouchableOpacity
+                            style={styles.inputCard}
+                            onPress={() => {
+                                Keyboard.dismiss();
+                                setShowCalcKeyboard(false);
+                                setShowCategoryModal(true);
+                            }}
+                        >
+                            {selectedCategory ? (() => {
+                                const cat = categories.find(c => c.id === selectedCategory);
+                                if (!cat) return null;
+                                return (
+                                    <>
+                                        <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: cat.color + '20' }]}>
+                                            <Ionicons name={cat.icon as any} size={18} color={cat.color} />
+                                        </View>
+                                        <Text style={styles.inputText}>{t(cat.name as TranslationKeys)}</Text>
+                                    </>
+                                );
+                            })() : (
+                                <>
+                                    <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' }]}>
+                                        <Ionicons name="help" size={18} color="#94A3B8" />
                                     </View>
-                                    <Text style={[
-                                        styles.categoryName,
-                                        selectedCategory === cat.id && { color: cat.color, fontWeight: '700' }
-                                    ]}>{t(cat.name as TranslationKeys)}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </Animated.View>
+                                    <Text style={[styles.inputText, { color: '#94A3B8' }]}>{t('select_category')}</Text>
+                                </>
+                            )}
+                            <Ionicons name="chevron-down" size={20} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
+                        </TouchableOpacity>
+                    </View>
 
                     {/* Wallet Selection */}
-                    <Animated.View entering={FadeInDown.delay(300).springify()} style={styles.inputSection}>
+                    <View style={styles.inputGroup}>
                         <Text style={styles.label}>{t('wallet')}</Text>
                         <WalletSelector
                             wallets={wallets}
@@ -323,33 +413,228 @@ export default function EditTransaction() {
                             walletBalances={walletBalances}
                             onSelect={setSelectedWallet}
                         />
-                    </Animated.View>
+                    </View>
 
-                    {/* Note */}
-                    <Animated.View entering={FadeInDown.delay(350).springify()} style={styles.inputSection}>
+                    {/* Note Input */}
+                    <View style={[styles.inputGroup, { marginBottom: 40 }]}>
                         <Text style={styles.label}>{t('note')}</Text>
-                        <TextInput
-                            style={styles.noteInput}
-                            value={description}
-                            onChangeText={setDescription}
-                            placeholder={t('add_a_note')}
-                            placeholderTextColor="#999"
-                        />
-                    </Animated.View>
-                </Animated.ScrollView>
-            </KeyboardAvoidingView>
+                        <View style={styles.inputCard}>
+                            <Ionicons name="document-text-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                            <TextInput
+                                style={styles.noteInput}
+                                value={description}
+                                onChangeText={setDescription}
+                                placeholder={t('add_a_note')}
+                                placeholderTextColor="#94A3B8"
+                                onFocus={() => setShowCalcKeyboard(false)}
+                            />
+                        </View>
+                    </View>
+                </View>
+            </Animated.ScrollView>
 
-            {/* Update Button */}
-            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) + 20 }]}>
-                <TouchableOpacity
-                    style={[styles.saveButton, (!selectedCategory || !selectedWallet || getCalculatedAmount() <= 0) && styles.saveButtonDisabled]}
-                    onPress={handleUpdate}
-                    disabled={!selectedCategory || !selectedWallet || getCalculatedAmount() <= 0}
-                >
-                    <Text style={styles.saveButtonText}>{t('save')}</Text>
-                </TouchableOpacity>
-            </View>
-        </View >
+            {/* Category Bottom Sheet Modal */}
+            <Modal visible={showCategoryModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <TouchableWithoutFeedback onPress={() => setShowCategoryModal(false)}>
+                        <View style={StyleSheet.absoluteFill} />
+                    </TouchableWithoutFeedback>
+                    <Animated.View
+                        entering={SlideInDown.duration(300)}
+                        exiting={SlideOutDown.duration(200)}
+                        style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 20), maxHeight: '60%' }]}
+                    >
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>{t('select_category')}</Text>
+                            <TouchableOpacity onPress={() => setShowCategoryModal(false)} style={styles.modalCloseBtn}>
+                                <Ionicons name="close" size={24} color="#64748B" />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                            {categories.map(cat => {
+                                const isSelected = selectedCategory === cat.id;
+                                return (
+                                    <TouchableOpacity
+                                        key={cat.id}
+                                        style={[
+                                            styles.modalOption,
+                                            isSelected && styles.modalOptionActive
+                                        ]}
+                                        onPress={() => {
+                                            setSelectedCategory(cat.id);
+                                            setShowCategoryModal(false);
+                                        }}
+                                        activeOpacity={0.5}
+                                    >
+                                        <View style={[styles.modalOptionIconBg, { backgroundColor: cat.color + '20' }]}>
+                                            <Ionicons name={cat.icon as any} size={24} color={cat.color} />
+                                        </View>
+                                        <Text style={[
+                                            styles.modalOptionText,
+                                            isSelected && { color: cat.color, fontFamily: 'Prompt_600SemiBold' }
+                                        ]}>{t(cat.name as TranslationKeys)}</Text>
+                                        {isSelected && (
+                                            <Ionicons name="checkmark" size={20} color={cat.color} style={{ marginLeft: 'auto' }} />
+                                        )}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    </Animated.View>
+                </View>
+            </Modal>
+
+            {/* Custom Calculator Keyboard Modal overlaying at bottom */}
+            {showCalcKeyboard && (
+                <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+                    <TouchableWithoutFeedback onPress={dismissCalculator}>
+                        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} />
+                    </TouchableWithoutFeedback>
+                    <Animated.View
+                        entering={SlideInDown.duration(250).springify()}
+                        exiting={SlideOutDown.duration(200)}
+                        style={[styles.calcKeyboardContainer, calcAnimatedStyle, { paddingBottom: Math.max(insets.bottom, 20) }]}
+                        {...calcPanResponder.panHandlers}
+                    >
+                        <View style={styles.calcDragIndicator} />
+                        {/* Row 1: C ÷ × ⌫ */}
+                        <View style={styles.calcRow}>
+                            <TouchableOpacity style={[styles.calcKey, styles.calcKeyFunc]} onPress={handleClear} activeOpacity={0.6}>
+                                <Text style={[styles.calcKeyText, styles.calcKeyFuncText]}>C</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.calcKey, styles.calcKeyFunc]} onPress={() => handleOperatorPress('÷')} activeOpacity={0.6}>
+                                <Text style={[styles.calcKeyText, styles.calcKeyFuncText]}>÷</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.calcKey, styles.calcKeyFunc]} onPress={() => handleOperatorPress('×')} activeOpacity={0.6}>
+                                <Text style={[styles.calcKeyText, styles.calcKeyFuncText]}>×</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.calcKey, styles.calcKeyFunc]} onPress={handleBackspace} activeOpacity={0.6}>
+                                <Ionicons name="backspace-outline" size={24} color="#8B5CF6" />
+                            </TouchableOpacity>
+                        </View>
+                        {/* Row 2: 7 8 9 − */}
+                        <View style={styles.calcRow}>
+                            <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('7')} activeOpacity={0.6}>
+                                <Text style={styles.calcKeyText}>7</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('8')} activeOpacity={0.6}>
+                                <Text style={styles.calcKeyText}>8</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('9')} activeOpacity={0.6}>
+                                <Text style={styles.calcKeyText}>9</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.calcKey, styles.calcKeyFunc]} onPress={() => handleOperatorPress('−')} activeOpacity={0.6}>
+                                <Text style={[styles.calcKeyText, styles.calcKeyFuncText]}>−</Text>
+                            </TouchableOpacity>
+                        </View>
+                        {/* Row 3: 4 5 6 + */}
+                        <View style={styles.calcRow}>
+                            <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('4')} activeOpacity={0.6}>
+                                <Text style={styles.calcKeyText}>4</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('5')} activeOpacity={0.6}>
+                                <Text style={styles.calcKeyText}>5</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('6')} activeOpacity={0.6}>
+                                <Text style={styles.calcKeyText}>6</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.calcKey, styles.calcKeyFunc]} onPress={() => handleOperatorPress('+')} activeOpacity={0.6}>
+                                <Text style={[styles.calcKeyText, styles.calcKeyFuncText]}>+</Text>
+                            </TouchableOpacity>
+                        </View>
+                        {/* Row 4 & 5: 1 2 3 ✓ (save spans 2 rows) | 0 . ✓ */}
+                        <View style={styles.calcBottomRows}>
+                            <View style={styles.calcBottomLeft}>
+                                <View style={styles.calcRow}>
+                                    <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('1')} activeOpacity={0.6}>
+                                        <Text style={styles.calcKeyText}>1</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('2')} activeOpacity={0.6}>
+                                        <Text style={styles.calcKeyText}>2</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('3')} activeOpacity={0.6}>
+                                        <Text style={styles.calcKeyText}>3</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <View style={styles.calcRow}>
+                                    <TouchableOpacity style={[styles.calcKey, { flex: 2 }]} onPress={() => handleNumberPress('0')} activeOpacity={0.6}>
+                                        <Text style={styles.calcKeyText}>0</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.calcKey} onPress={() => handleNumberPress('.')} activeOpacity={0.6}>
+                                        <Text style={styles.calcKeyText}>.</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.calcKeySave}
+                                onPress={dismissCalculator}
+                                activeOpacity={0.75}
+                            >
+                                <LinearGradient
+                                    colors={['#6366F1', '#8B5CF6']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.calcKeySaveGradient}
+                                >
+                                    <Ionicons name="checkmark" size={32} color="#fff" />
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+                    </Animated.View>
+                </View>
+            )}
+
+            {Platform.OS === 'ios' ? (
+                <Modal visible={showDatePicker} transparent animationType="fade">
+                    <View style={styles.modalOverlay}>
+                        <Animated.View
+                            entering={SlideInDown.duration(300)}
+                            exiting={SlideOutDown.duration(200)}
+                            style={styles.modalContent}
+                        >
+                            <View style={styles.modalHeader}>
+                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                    <Text style={styles.modalCancel}>{t('cancel')}</Text>
+                                </TouchableOpacity>
+                                <Text style={styles.modalTitle}>{t('select_date')}</Text>
+                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                    <Text style={styles.modalDone}>{t('done')}</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <DateTimePicker
+                                value={selectedDate}
+                                mode="date"
+                                display="spinner"
+                                onChange={handleDateChange}
+                                maximumDate={new Date()}
+                            />
+                        </Animated.View>
+                    </View>
+                </Modal>
+            ) : (
+                showDatePicker && (
+                    <DateTimePicker
+                        value={selectedDate}
+                        mode="date"
+                        display="default"
+                        onChange={handleDateChange}
+                        maximumDate={new Date()}
+                    />
+                )
+            )}
+
+            {!showCalcKeyboard && (
+                <Animated.View entering={SlideInDown.duration(200)} exiting={SlideOutDown.duration(200)} style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+                    <TouchableOpacity
+                        style={[styles.saveButton, (!selectedCategory || !selectedWallet || getCalculatedAmount() <= 0) && styles.saveButtonDisabled]}
+                        onPress={handleUpdate}
+                        disabled={!selectedCategory || !selectedWallet || getCalculatedAmount() <= 0}
+                    >
+                        <Text style={styles.saveButtonText}>{t('save')}</Text>
+                    </TouchableOpacity>
+                </Animated.View>
+            )}
+        </KeyboardAvoidingView>
     );
 }
 
@@ -358,227 +643,203 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#fff',
     },
-    header: {
+    topHeader: {
+        paddingHorizontal: 20,
+        paddingBottom: 24,
+        backgroundColor: '#fff',
+        zIndex: 10,
+    },
+    topNav: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingVertical: 16,
+        marginBottom: 20,
     },
-    headerCloseBtn: {
+    navBtn: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#F5F3FF', // Very light violet background
+        backgroundColor: '#F5F3FF',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    headerTitle: {
+    navTitle: {
         fontSize: 18,
         fontFamily: 'Prompt_700Bold',
         color: '#1E293B',
     },
-    content: {
-        flex: 1,
-        padding: 20,
+    amountArea: {
+        alignItems: 'center',
     },
-    typeSelector: {
-        flexDirection: 'row',
-        marginBottom: 24,
-        backgroundColor: '#f5f5f5',
+    typeBadge: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
         borderRadius: 12,
-        padding: 4,
+        marginBottom: 8,
     },
-    typeButton: {
-        flex: 1,
-        paddingVertical: 10,
-        alignItems: 'center',
-        borderRadius: 10,
-    },
-    activeIncome: {
-        backgroundColor: Colors.light.success,
-    },
-    activeExpense: {
-        backgroundColor: Colors.light.danger,
-    },
-    typeText: {
-        fontSize: 16,
+    typeBadgeText: {
+        fontSize: 12,
         fontFamily: 'Prompt_600SemiBold',
-        color: '#666',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
-    activeText: {
-        color: '#fff',
-    },
-    inputSection: {
-        marginBottom: 20,
-    },
-    label: {
-        fontSize: 14,
-        color: '#666',
-        marginBottom: 10,
-        fontFamily: 'Prompt_500Medium',
-    },
-    amountContainer: {
+    amountInputWrapper: {
         flexDirection: 'row',
-        alignItems: 'center',
-    },
-    currencySymbol: {
-        fontSize: 32,
-        fontFamily: 'Prompt_700Bold',
-        color: '#333',
-        marginRight: 4,
-    },
-    amountInput: {
-        fontSize: 40,
-        fontFamily: 'Prompt_700Bold',
-        color: '#333',
-        flex: 1,
-    },
-    calculatedPreview: {
-        fontSize: 18,
-        color: Colors.light.success,
-        fontFamily: 'Prompt_600SemiBold',
-        marginTop: 8,
-    },
-    calculatorRow: {
-        flexDirection: 'row',
-        marginTop: 12,
-        gap: 8,
-    },
-    calcBtn: {
-        flex: 1,
-        paddingVertical: 12,
-        backgroundColor: '#f5f5f5',
-        borderRadius: 10,
         alignItems: 'center',
         justifyContent: 'center',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
     },
-    calcBtnText: {
-        fontSize: 20,
+    currencySymbolLarge: {
+        fontSize: 36,
         fontFamily: 'Prompt_600SemiBold',
-        color: '#333',
+        marginRight: 6,
+        paddingBottom: 4,
     },
-    dateButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#f9f9f9',
-        padding: 14,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#eee',
-        gap: 10,
+    amountInputLarge: {
+        fontSize: 56,
+        fontFamily: 'Prompt_700Bold',
+        minWidth: 60,
+        textAlign: 'center',
+        padding: 0,
+        margin: 0,
     },
-    dateText: {
-        flex: 1,
+    calculatedPreviewTop: {
         fontSize: 16,
-        color: '#333',
-        fontFamily: 'Prompt_500Medium',
+        fontFamily: 'Prompt_600SemiBold',
+        color: '#64748B',
+        marginTop: 4,
+        backgroundColor: '#F1F5F9',
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        borderRadius: 12,
+        overflow: 'hidden',
     },
-    modalOverlay: {
+
+    scrollView: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.4)',
-        justifyContent: 'flex-end',
     },
-    modalContent: {
+    formContent: {
+        padding: 20,
+        paddingTop: 32,
+    },
+
+    typeSelectorContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#E2E8F0',
+        borderRadius: 16,
+        padding: 6,
+        marginBottom: 28,
+    },
+    typeBtn: {
+        flex: 1,
+        paddingVertical: 12,
+        alignItems: 'center',
+        borderRadius: 14,
+    },
+    typeBtnExpenseActive: {
         backgroundColor: '#fff',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        paddingBottom: 40,
+        shadowColor: '#EF4444',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
     },
-    modalHeader: {
+    typeBtnIncomeActive: {
+        backgroundColor: '#fff',
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    typeBtnText: {
+        fontSize: 15,
+        fontFamily: 'Prompt_600SemiBold',
+        color: '#64748B',
+    },
+    typeBtnTextActive: {
+        color: '#0F172A',
+    },
+
+    inputGroup: {
+        marginBottom: 24,
+    },
+    labelRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#eee',
     },
-    modalTitle: {
-        fontSize: 17,
-        fontFamily: 'Prompt_600SemiBold',
-        color: '#333',
+    label: {
+        fontSize: 14,
+        fontFamily: 'Prompt_500Medium',
+        color: '#475569',
+        marginBottom: 10,
     },
-    modalCancel: {
+    inputCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        height: 58,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 8,
+        elevation: 1,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
+    },
+    inputIcon: {
+        marginRight: 12,
+    },
+    inputText: {
+        flex: 1,
         fontSize: 16,
-        color: '#999',
+        fontFamily: 'Prompt_500Medium',
+        color: '#1E293B',
+    },
+    noteInput: {
+        flex: 1,
+        fontSize: 16,
         fontFamily: 'Prompt_400Regular',
+        color: '#1E293B',
     },
-    modalDone: {
-        fontSize: 16,
-        color: Colors.light.tint,
-        fontFamily: 'Prompt_600SemiBold',
-    },
+
     categoryHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 10,
     },
-    manageBtn: {
-        color: Colors.light.tint,
-        fontFamily: 'Prompt_600SemiBold',
-    },
-    categoryGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 12,
-        marginBottom: 24,
-    },
-    categoryItem: {
-        width: '30%',
-        aspectRatio: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#eee',
-        backgroundColor: '#fff',
-    },
-    categoryItemActive: {
-        borderColor: 'transparent',
-    },
-    iconCircle: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 8,
-    },
-    categoryName: {
-        fontSize: 12,
-        color: '#666',
-        textAlign: 'center',
-        fontFamily: 'Prompt_400Regular',
-    },
-    noteInput: {
-        backgroundColor: '#f9f9f9',
-        padding: 16,
-        borderRadius: 12,
-        fontSize: 16,
-        borderWidth: 1,
-        borderColor: '#eee',
-        color: '#333',
-        fontFamily: 'Prompt_400Regular',
-    },
+
+
     footer: {
-        padding: 20,
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: '#fff',
+        paddingHorizontal: 20,
+        paddingTop: 16,
         borderTopWidth: 1,
-        borderTopColor: '#f0f0f0',
+        borderTopColor: '#F1F5F9',
     },
     saveButton: {
-        backgroundColor: Colors.light.tint,
-        padding: 18,
-        borderRadius: 16,
+        backgroundColor: '#6366F1',
+        height: 58,
+        borderRadius: 18,
         alignItems: 'center',
-        shadowColor: Colors.light.tint,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
+        justifyContent: 'center',
+        shadowColor: '#6366F1',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25,
+        shadowRadius: 10,
         elevation: 4,
     },
     saveButtonDisabled: {
-        backgroundColor: '#ccc',
+        backgroundColor: '#CBD5E1',
         shadowOpacity: 0,
         elevation: 0,
     },
@@ -586,5 +847,168 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 18,
         fontFamily: 'Prompt_700Bold',
+    },
+
+    calcKeyboardContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: '#F8FAFC',
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+        paddingHorizontal: 16,
+        paddingTop: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -5 },
+        shadowOpacity: 0.1,
+        shadowRadius: 15,
+        elevation: 15,
+        borderTopWidth: 1,
+        borderTopColor: '#E2E8F0',
+    },
+    calcRow: {
+        flexDirection: 'row',
+        gap: 10,
+        marginBottom: 10,
+    },
+    calcKey: {
+        flex: 1,
+        height: 60,
+        borderRadius: 16,
+        backgroundColor: '#fff',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#64748B',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    calcKeyText: {
+        fontSize: 26,
+        fontFamily: 'Prompt_500Medium',
+        color: '#1E293B',
+    },
+    calcKeyFunc: {
+        backgroundColor: '#EEF2FF',
+    },
+    calcKeyFuncText: {
+        color: '#8B5CF6',
+        fontSize: 26,
+    },
+    calcBottomRows: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    calcBottomLeft: {
+        flex: 3,
+        gap: 0,
+    },
+    calcKeySave: {
+        flex: 1,
+        borderRadius: 16,
+        overflow: 'hidden',
+        marginBottom: 10,
+        shadowColor: '#6366F1',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        elevation: 6,
+    },
+    calcKeySaveGradient: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+        paddingTop: 8,
+        paddingBottom: 40,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 24,
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F1F5F9',
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontFamily: 'Prompt_700Bold',
+        color: '#1E293B',
+    },
+    modalCloseBtn: {
+        padding: 4,
+    },
+    modalScroll: {
+        padding: 24,
+    },
+    manageBtn: {
+        color: '#6366F1',
+        fontFamily: 'Prompt_600SemiBold',
+        fontSize: 16,
+    },
+    modalOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 16,
+        marginHorizontal: 16,
+        marginBottom: 12,
+        backgroundColor: '#F8FAFC',
+        borderWidth: 1,
+        borderColor: 'transparent',
+    },
+    modalOptionActive: {
+        borderColor: '#E2E8F0',
+        backgroundColor: '#fff',
+        shadowColor: '#64748B',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+    },
+    modalOptionIconBg: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    modalOptionText: {
+        fontSize: 16,
+        fontFamily: 'Prompt_500Medium',
+        color: '#334155',
+    },
+    calcDragIndicator: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#E2E8F0',
+        alignSelf: 'center',
+        marginVertical: 12,
+    },
+    modalCancel: {
+        fontSize: 16,
+        color: '#64748B',
+        fontFamily: 'Prompt_400Regular',
+    },
+    modalDone: {
+        fontSize: 16,
+        color: '#6366F1',
+        fontFamily: 'Prompt_600SemiBold',
     },
 });

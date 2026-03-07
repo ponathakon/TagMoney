@@ -1059,7 +1059,6 @@ const styles = StyleSheet.create({
     scrollViewContent: {
         flex: 1,
         paddingHorizontal: 24,
-        paddingTop: 24,
     },
 
     // Preview - Updated to match WalletCard
