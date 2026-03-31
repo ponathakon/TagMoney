@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 18,
         paddingTop: 12,
-        fontFamily: 'Prompt_600SemiBold',
+        fontFamily: 'Prompt_500Medium',
         letterSpacing: -0.5,
     },
     currency: {

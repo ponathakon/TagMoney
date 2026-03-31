@@ -31,6 +31,7 @@ const th: Record<string, string> = {
     expense: 'รายจ่าย',
     my_wallets: 'กระเป๋าเงินของฉัน',
     recent_transactions: 'รายการล่าสุด',
+    all_transactions: 'ธุรกรรมทั้งหมด',
     see_all: 'ดูทั้งหมด',
     no_transactions_yet: 'ยังไม่มีรายการ',
     add_first_transaction: 'เพิ่มรายการแรกของคุณเพื่อเริ่มต้น',
@@ -139,6 +140,11 @@ const th: Record<string, string> = {
     delete_transaction: 'ลบรายการ',
     delete_transaction_confirm: 'คุณแน่ใจหรือไม่ว่าต้องการลบรายการนี้?',
     net_balance: 'ยอดสุทธิ',
+    day: 'รายวัน',
+    week: 'รายสัปดาห์',
+    month: 'รายเดือน',
+    year: 'รายปี',
+    all_wallets: 'กระเป๋าทั้งหมด',
     today: 'วันนี้',
     yesterday: 'เมื่อวาน',
 
@@ -159,8 +165,7 @@ const th: Record<string, string> = {
     total_categories: '{count} หมวดหมู่',
     search_categories: 'ค้นหาหมวดหมู่...',
     no_categories_found: 'ไม่พบหมวดหมู่',
-    tap_to_create_category: 'แตะปุ่ม + เพื่อสร้างหมวดหมู่ใหม่',
-    new_category: 'หมวดหมู่ใหม่',
+    new_category: 'หมวดหมู่',
     select_icon: 'เลือกไอคอน',
     select_color: 'เลือกสี',
 
@@ -246,13 +251,13 @@ const th: Record<string, string> = {
     delete_chat_confirm: 'คุณแน่ใจว่าต้องการลบแชทนี้หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้',
 
     // Voice Tracker
-    voice_tracker: 'ติดตามด้วยเสียง',
+    voice_tracker: 'บันทึกด้วยเสียง',
     listening: 'กำลังฟัง...',
     tap_to_speak: 'แตะเพื่อพูด',
     tap_to_stop: 'แตะอีกครั้งเพื่อหยุด',
     try_saying: 'ลองพูดว่า',
-    voice_example_1: '"จ่ายค่าอาหาร 20 ดอลลาร์และค่าเดินทาง 15 ดอลลาร์"',
-    voice_example_2: '"รายได้ 5000 จากเงินเดือน"',
+    voice_example_1: '"จ่ายค่าอาหาร 20 บาทและค่าเดินทาง 15 บาท"',
+    voice_example_2: '"ได้รับเงินเดือน 5,000 บาท"',
     processing_voice: 'กำลังประมวลผลเสียงของคุณ...',
     identifying_transactions: 'กำลังระบุรายการ',
     transaction_found: 'พบรายการ',
@@ -282,10 +287,10 @@ const th: Record<string, string> = {
 
     // Tracker Options Modal
     choose_how_to_track: 'เลือกวิธีที่คุณต้องการติดตาม',
-    manual: 'ด้วยตนเอง',
-    enter_details: 'กรอกรายละเอียด',
+    manual: 'จดบันทึก',
+    enter_details: 'บันทึกรายการด้วยตัวเอง',
     voice: 'เสียง',
-    speak_to_add: 'พูดเพื่อเพิ่ม',
+    speak_to_add: 'พูดเพื่อบันทึกรายการ',
     picture: 'รูปภาพ',
     scan_receipt_short: 'สแกนใบเสร็จ',
 };

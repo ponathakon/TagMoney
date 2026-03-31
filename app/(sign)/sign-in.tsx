@@ -48,48 +48,21 @@ export default function SignIn() {
         }
     };
 
-    const onGoogleSignIn = async () => {
+    const onSSOSignIn = async (strategy: 'oauth_google' | 'oauth_facebook') => {
         try {
-            const { createdSessionId, setActive, signIn, signUp } = await startSSOFlow({
-                strategy: 'oauth_google',
+            const { createdSessionId, setActive: setActiveSession } = await startSSOFlow({
+                strategy,
                 redirectUrl: AuthSession.makeRedirectUri(),
             });
-            console.log("createdSessionId", createdSessionId);
 
             if (createdSessionId) {
-                setActive!({
+                setActiveSession!({
                     session: createdSessionId,
                     navigate: async ({ session }) => {
                         if (session?.currentTask) {
-                            console.log(session?.currentTask)
-                            return
+                            return;
                         }
-                        router.push('/')
-                    }
-                });
-            }
-        } catch (error) {
-            console.log(error);
-        }
-    };
-
-    const onFacebookSignIn = async () => {
-        try {
-            const { createdSessionId, setActive, signIn, signUp } = await startSSOFlow({
-                strategy: 'oauth_facebook',
-                redirectUrl: AuthSession.makeRedirectUri(),
-            });
-            console.log("createdSessionId", createdSessionId);
-
-            if (createdSessionId) {
-                setActive!({
-                    session: createdSessionId,
-                    navigate: async ({ session }) => {
-                        if (session?.currentTask) {
-                            console.log(session?.currentTask)
-                            return
-                        }
-                        router.push('/')
+                        router.push('/');
                     }
                 });
             }
@@ -152,12 +125,12 @@ export default function SignIn() {
                         <View style={styles.dividerLine} />
                     </View>
 
-                    <TouchableOpacity style={styles.googleButton} onPress={onGoogleSignIn}>
+                    <TouchableOpacity style={styles.googleButton} onPress={() => onSSOSignIn('oauth_google')}>
                         <Ionicons name="logo-google" size={20} color="#333" />
                         <Text style={styles.googleButtonText}>Google</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.googleButton} onPress={onFacebookSignIn}>
+                    <TouchableOpacity style={styles.googleButton} onPress={() => onSSOSignIn('oauth_facebook')}>
                         <Ionicons name="logo-facebook" size={20} color="#333" />
                         <Text style={styles.googleButtonText}>Facebook</Text>
                     </TouchableOpacity>

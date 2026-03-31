@@ -11,6 +11,7 @@ import {
     removeData,
     saveCurrency
 } from '@/utils/storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -48,12 +49,33 @@ export default function Profile() {
     useFocusEffect(
         useCallback(() => {
             loadCurrency();
+            loadNotificationSetting();
         }, [])
     );
 
     const loadCurrency = async () => {
         const code = await getCurrency();
         setCurrentCurrency(getCurrencyByCode(code));
+    };
+
+    const loadNotificationSetting = async () => {
+        try {
+            const value = await AsyncStorage.getItem('notifications_enabled');
+            if (value !== null) {
+                setNotificationsEnabled(value === 'true');
+            }
+        } catch (e) {
+            console.error('Error loading notification setting:', e);
+        }
+    };
+
+    const handleNotificationToggle = async (value: boolean) => {
+        setNotificationsEnabled(value);
+        try {
+            await AsyncStorage.setItem('notifications_enabled', value.toString());
+        } catch (e) {
+            console.error('Error saving notification setting:', e);
+        }
     };
 
     const handleCurrencySelect = async (currency: Currency) => {
@@ -77,11 +99,11 @@ export default function Profile() {
 
             // Create CSV content
             const header = 'Date,Title,Amount,Type,Category,Wallet\n';
-            const rows = transactions.map((t: any) => {
-                const walletName = wallets.find(w => w.id === t.walletId)?.name || 'Unknown';
-                const category = categories?.find(c => c.id === t.categoryId);
+            const rows = transactions.map((tx: any) => {
+                const walletName = wallets.find(w => w.id === tx.walletId)?.name || 'Unknown';
+                const category = categories?.find(c => c.id === tx.categoryId);
                 const categoryName = category?.name || 'Uncategorized';
-                return `${t.date},"${t.title}",${t.amount},${t.type},${categoryName},${walletName}`;
+                return `${tx.date},"${tx.title}",${tx.amount},${tx.type},${categoryName},${walletName}`;
             }).join('\n');
 
             const csvContent = header + rows;
@@ -178,16 +200,7 @@ export default function Profile() {
                                     </View>
                                 )}
                             </LinearGradient>
-                            <View style={styles.badgeContainer}>
-                                <LinearGradient
-                                    colors={['#F59E0B', '#D97706']}
-                                    style={styles.proBadge}
-                                    start={{ x: 0, y: 0 }}
-                                    end={{ x: 1, y: 1 }}
-                                >
-                                    <Text style={styles.proText}>PRO</Text>
-                                </LinearGradient>
-                            </View>
+
                         </View>
 
                         <Text style={styles.userName}>{user?.fullName || user?.username || 'User'}</Text>
@@ -221,7 +234,7 @@ export default function Profile() {
                                 rightElement={
                                     <Switch
                                         value={notificationsEnabled}
-                                        onValueChange={setNotificationsEnabled}
+                                        onValueChange={handleNotificationToggle}
                                         trackColor={{ false: '#E2E8F0', true: '#818CF8' }}
                                         thumbColor={'#fff'}
                                     />

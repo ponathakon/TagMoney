@@ -394,8 +394,8 @@ export const addCategory = async (category: Category): Promise<Category[]> => {
 export const deleteCategory = async (id: string): Promise<Category[]> => {
     try {
         const database = await ensureDb();
-        // Delete all transactions associated with this category
-        await database.runAsync('DELETE FROM transactions WHERE categoryId = ?', [id]);
+        // Nullify categoryId on associated transactions (don't delete them)
+        await database.runAsync('UPDATE transactions SET categoryId = NULL, category = NULL WHERE categoryId = ?', [id]);
         // Delete the category
         await database.runAsync('DELETE FROM categories WHERE id = ?', [id]);
         return (await getCategories()) || [];
@@ -408,7 +408,7 @@ export const deleteCategory = async (id: string): Promise<Category[]> => {
 // Wallet operations
 export const getWallets = async (): Promise<Wallet[]> => {
     const database = await ensureDb();
-    const rows = await database.getAllAsync<Wallet>('SELECT * FROM wallets ORDER BY createdAt ASC');
+    const rows = await database.getAllAsync<Wallet>('SELECT * FROM wallets ORDER BY createdAt DESC');
     return rows;
 };
 
@@ -443,8 +443,8 @@ export const updateWallet = async (wallet: Wallet): Promise<Wallet[]> => {
 export const deleteWallet = async (id: string): Promise<Wallet[]> => {
     try {
         const database = await ensureDb();
-        // Delete all transactions associated with this wallet
-        await database.runAsync('DELETE FROM transactions WHERE walletId = ?', [id]);
+        // Nullify walletId on associated transactions (don't delete them)
+        await database.runAsync('UPDATE transactions SET walletId = NULL WHERE walletId = ?', [id]);
         // Delete the wallet
         await database.runAsync('DELETE FROM wallets WHERE id = ?', [id]);
         return getWallets();

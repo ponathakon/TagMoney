@@ -1,14 +1,13 @@
-import { WalletSelector } from '@/components/WalletSelector';
 import { Category, INITIAL_CATEGORIES } from '@/constants/categories';
 import { getCurrencyByCode } from '@/constants/currencies';
 import { useLanguage } from '@/context/LanguageContext';
 import { TranslationKeys } from '@/i18n';
-import { addTransaction, getCategories, getCurrency, getWalletBalance, getWallets, saveCategories } from '@/utils/storage';
+import { addTransaction, deleteTransaction, getCategories, getCurrency, getData, getWalletBalance, getWallets, saveCategories, StorageKeys, updateTransaction } from '@/utils/storage';
 import { Transaction, Wallet } from '@/utils/types';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     Alert,
@@ -55,8 +54,12 @@ const evaluateExpression = (expr: string): number | null => {
 
 export default function AddTransaction() {
     const router = useRouter();
+    const { id } = useLocalSearchParams();
+    const isEditing = !!id;
     const insets = useSafeAreaInsets();
     const { t, languageCode } = useLanguage();
+
+    const [loading, setLoading] = useState(false);
 
     // Form state
     const [amount, setAmount] = useState('');
@@ -68,11 +71,13 @@ export default function AddTransaction() {
     const [showDatePicker, setShowDatePicker] = useState(false);
 
     // Calculator Keyboard State
-    const [showCalcKeyboard, setShowCalcKeyboard] = useState(true); // default true for convenience
+    const [showCalcKeyboard, setShowCalcKeyboard] = useState(!isEditing); // visible by default for add, hidden for edit
     const amountInputRef = useRef<TextInput>(null);
 
-    // Category Modal State
+    // Category and Wallet Modal State
     const [showCategoryModal, setShowCategoryModal] = useState(false);
+    const [showWalletModal, setShowWalletModal] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
 
     // Swipe-to-dismiss Calc Keyboard
     const calcTranslateY = useSharedValue(0);
@@ -124,9 +129,7 @@ export default function AddTransaction() {
     const [currencySymbol, setCurrencySymbol] = useState('$');
 
     useEffect(() => {
-        loadCategories();
-        loadWallets();
-        loadCurrency();
+        loadData();
 
         // Hide our custom calc keyboard if the system keyboard shows up (e.g. Note input)
         const kbDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
@@ -135,38 +138,59 @@ export default function AddTransaction() {
         return () => {
             kbDidShowListener.remove();
         };
-    }, []);
+    }, [id]);
 
-    const loadCategories = async () => {
+    const loadData = async () => {
+        setLoading(true);
+
+        // Load categories
         let stored = await getCategories();
         if (!stored) {
             stored = INITIAL_CATEGORIES;
             await saveCategories(INITIAL_CATEGORIES);
         }
         setAllCategories(stored);
-        // Auto-select first expense category as default
-        const expenseCats = stored.filter(c => c.type === 'expense');
-        if (expenseCats.length > 0) {
-            setSelectedCategory(expenseCats[0].id);
-        }
-    };
 
-    const loadWallets = async () => {
+        // Load wallets
         const walletsData = await getWallets();
         setWallets(walletsData);
-        if (walletsData.length > 0 && !selectedWallet) {
-            setSelectedWallet(walletsData[0].id);
-        }
         const balances: Record<string, number> = {};
         for (const wallet of walletsData) {
             balances[wallet.id] = await getWalletBalance(wallet.id);
         }
         setWalletBalances(balances);
-    };
 
-    const loadCurrency = async () => {
+        // Load currency
         const currencyCode = await getCurrency();
         setCurrencySymbol(getCurrencyByCode(currencyCode).symbol);
+
+        if (isEditing) {
+            // Edit mode: load existing transaction
+            const data = await getData(StorageKeys.TRANSACTIONS);
+            const transaction = data?.find((t: Transaction) => t.id === id);
+            if (transaction) {
+                setAmount(transaction.amount.toString());
+                setType(transaction.type);
+                setSelectedCategory(transaction.categoryId || null);
+                setSelectedWallet(transaction.walletId || null);
+                setDescription(transaction.title);
+                setSelectedDate(new Date(transaction.date));
+            } else {
+                Alert.alert(t('error'), t('no_transactions_found'));
+                router.back();
+            }
+        } else {
+            // Add mode: auto-select defaults
+            const expenseCats = stored.filter(c => c.type === 'expense');
+            if (expenseCats.length > 0) {
+                setSelectedCategory(expenseCats[0].id);
+            }
+            if (walletsData.length > 0) {
+                setSelectedWallet(walletsData[0].id);
+            }
+        }
+
+        setLoading(false);
     };
 
     const categories = allCategories.filter(c => c.type === type);
@@ -236,21 +260,48 @@ export default function AddTransaction() {
         const category = categories.find(c => c.id === selectedCategory);
         if (!category) return;
 
-        const title = description.trim() || category.name;
+        const title = description.trim();
 
-        const newTransaction: Transaction = {
-            id: Date.now().toString(),
-            title,
-            amount: calculatedValue,
-            date: selectedDate.toISOString(),
-            type,
-            categoryId: category.id,
-            walletId: selectedWallet,
-        };
-
-        await addTransaction(newTransaction);
+        if (isEditing) {
+            const updatedTransaction: Transaction = {
+                id: id as string,
+                title,
+                amount: calculatedValue,
+                date: selectedDate.toISOString(),
+                type,
+                categoryId: category.id,
+                walletId: selectedWallet,
+            };
+            await updateTransaction(updatedTransaction);
+        } else {
+            const newTransaction: Transaction = {
+                id: Date.now().toString(),
+                title,
+                amount: calculatedValue,
+                date: selectedDate.toISOString(),
+                type,
+                categoryId: category.id,
+                walletId: selectedWallet,
+            };
+            await addTransaction(newTransaction);
+        }
         router.back();
     };
+
+    const handleDelete = () => {
+        Keyboard.dismiss();
+        setShowDeleteModal(true);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (id) {
+            await deleteTransaction(id as string);
+            setShowDeleteModal(false);
+            router.back();
+        }
+    };
+
+    if (loading) return <View style={styles.container} />;
 
     const hasExpression = amount.includes('+') || amount.includes('−') || amount.includes('×') || amount.includes('÷');
     const calculatedDisplay = hasExpression ? getCalculatedAmount() : null;
@@ -265,8 +316,14 @@ export default function AddTransaction() {
             {/* Custom Header Area */}
             <View style={[styles.topHeader, { paddingTop: insets.top + 10 }]}>
                 <View style={styles.topNav}>
-                    <View style={{ width: 44 }} />
-                    <Text style={styles.navTitle}>{t('add_transaction')}</Text>
+                    {isEditing ? (
+                        <TouchableOpacity onPress={handleDelete} style={styles.navBtnDelete}>
+                            <Ionicons name="trash-outline" size={22} color="#EF4444" />
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={{ width: 44 }} />
+                    )}
+                    <Text style={styles.navTitle}>{isEditing ? t('edit_transaction') : t('add_transaction')}</Text>
                     <TouchableOpacity onPress={() => router.back()} style={styles.navBtn}>
                         <Ionicons name="close" size={24} color="#6366F1" />
                     </TouchableOpacity>
@@ -395,14 +452,41 @@ export default function AddTransaction() {
 
                     {/* Wallet Selection */}
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>{t('wallet')}</Text>
-                        <WalletSelector
-                            wallets={wallets}
-                            selectedWalletId={selectedWallet}
-                            currencySymbol={currencySymbol}
-                            walletBalances={walletBalances}
-                            onSelect={setSelectedWallet}
-                        />
+                        <View style={styles.labelRow}>
+                            <Text style={styles.label}>{t('wallet')}</Text>
+                            <TouchableOpacity onPress={() => router.push('/task/wallets')}>
+                                <Text style={styles.manageBtn}>{t('manage')}</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.inputCard}
+                            onPress={() => {
+                                Keyboard.dismiss();
+                                setShowCalcKeyboard(false);
+                                setShowWalletModal(true);
+                            }}
+                        >
+                            {selectedWallet ? (() => {
+                                const w = wallets.find(wall => wall.id === selectedWallet);
+                                if (!w) return null;
+                                return (
+                                    <>
+                                        <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: w.color + '20' }]}>
+                                            <Ionicons name={w.icon as any} size={18} color={w.color} />
+                                        </View>
+                                        <Text style={styles.inputText}>{t(w.name as TranslationKeys)}</Text>
+                                    </>
+                                );
+                            })() : (
+                                <>
+                                    <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' }]}>
+                                        <Ionicons name="wallet" size={18} color="#94A3B8" />
+                                    </View>
+                                    <Text style={[styles.inputText, { color: '#94A3B8' }]}>{t('select_wallet')}</Text>
+                                </>
+                            )}
+                            <Ionicons name="chevron-down" size={20} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
+                        </TouchableOpacity>
                     </View>
 
                     {/* Note Input */}
@@ -474,6 +558,63 @@ export default function AddTransaction() {
                 </View>
             </Modal>
 
+            {/* Wallet Bottom Sheet Modal */}
+            <Modal visible={showWalletModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <TouchableWithoutFeedback onPress={() => setShowWalletModal(false)}>
+                        <View style={StyleSheet.absoluteFill} />
+                    </TouchableWithoutFeedback>
+                    <Animated.View
+                        entering={SlideInDown.duration(300)}
+                        exiting={SlideOutDown.duration(200)}
+                        style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 20), maxHeight: '60%' }]}
+                    >
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>{t('select_wallet')}</Text>
+                            <TouchableOpacity onPress={() => setShowWalletModal(false)} style={styles.modalCloseBtn}>
+                                <Ionicons name="close" size={24} color="#64748B" />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                            {wallets.map(w => {
+                                const isSelected = selectedWallet === w.id;
+                                const balance = walletBalances[w.id] ?? w.initialBalance ?? 0;
+                                return (
+                                    <TouchableOpacity
+                                        key={w.id}
+                                        style={[
+                                            styles.modalOption,
+                                            isSelected && styles.modalOptionActive
+                                        ]}
+                                        onPress={() => {
+                                            setSelectedWallet(w.id);
+                                            setShowWalletModal(false);
+                                        }}
+                                        activeOpacity={0.5}
+                                    >
+                                        <View style={[styles.modalOptionIconBg, { backgroundColor: w.color + '20' }]}>
+                                            <Ionicons name={w.icon as any} size={24} color={w.color} />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={[
+                                                styles.modalOptionText,
+                                                isSelected && { color: w.color, fontFamily: 'Prompt_600SemiBold' }
+                                            ]}>{t(w.name as TranslationKeys)}</Text>
+                                            <Text style={[styles.modalOptionSubText, isSelected && { color: w.color + 'CC' }]}>
+                                                {currencySymbol}{balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </Text>
+                                        </View>
+                                        {isSelected && (
+                                            <Ionicons name="checkmark" size={20} color={w.color} style={{ marginLeft: 'auto' }} />
+                                        )}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    </Animated.View>
+                </View>
+            </Modal>
+
             {/* Custom Calculator Keyboard Modal overlaying at bottom */}
             {showCalcKeyboard && (
                 <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
@@ -487,6 +628,48 @@ export default function AddTransaction() {
                         {...calcPanResponder.panHandlers}
                     >
                         <View style={styles.calcDragIndicator} />
+
+                        {/* Quick Select Row (Category & Wallet) */}
+                        <View style={styles.calcQuickSelectRow}>
+                            <TouchableOpacity
+                                style={styles.calcQuickSelectChip}
+                                onPress={() => {
+                                    setShowCategoryModal(true);
+                                }}
+                                activeOpacity={0.6}
+                            >
+                                <Ionicons
+                                    name={selectedCategory ? categories.find(c => c.id === selectedCategory)?.icon as any || 'folder-outline' : 'folder-outline'}
+                                    size={18}
+                                    color={selectedCategory ? categories.find(c => c.id === selectedCategory)?.color : '#64748B'}
+                                />
+                                <Text style={styles.calcQuickSelectText} numberOfLines={1}>
+                                    {selectedCategory
+                                        ? t(categories.find(c => c.id === selectedCategory)?.name as TranslationKeys)
+                                        : t('category')}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.calcQuickSelectChip}
+                                onPress={() => {
+                                    setShowWalletModal(true);
+                                }}
+                                activeOpacity={0.6}
+                            >
+                                <Ionicons
+                                    name={selectedWallet ? wallets.find(w => w.id === selectedWallet)?.icon as any : 'wallet-outline'}
+                                    size={18}
+                                    color={selectedWallet ? wallets.find(w => w.id === selectedWallet)?.color : '#64748B'}
+                                />
+                                <Text style={styles.calcQuickSelectText} numberOfLines={1}>
+                                    {selectedWallet
+                                        ? t(wallets.find(w => w.id === selectedWallet)?.name as TranslationKeys)
+                                        : t('wallet')}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
                         {/* Row 1: C ÷ × ⌫ */}
                         <View style={styles.calcRow}>
                             <TouchableOpacity style={[styles.calcKey, styles.calcKeyFunc]} onPress={handleClear} activeOpacity={0.6}>
@@ -626,6 +809,42 @@ export default function AddTransaction() {
                     </TouchableOpacity>
                 </Animated.View>
             )}
+
+            {/* Custom Delete Confirmation Modal */}
+            <Modal visible={showDeleteModal} transparent animationType="fade">
+                <View style={styles.alertOverlay}>
+                    <TouchableWithoutFeedback onPress={() => setShowDeleteModal(false)}>
+                        <View style={StyleSheet.absoluteFill} />
+                    </TouchableWithoutFeedback>
+                    <Animated.View
+                        entering={FadeInDown.duration(200).springify()}
+                        style={styles.alertBox}
+                    >
+                        <View style={styles.alertIconWrapper}>
+                            <Ionicons name="trash" size={32} color="#EF4444" />
+                        </View>
+                        <Text style={styles.alertTitle}>{t('delete_transaction')}</Text>
+                        <Text style={styles.alertMessage}>{t('delete_transaction_confirm')}</Text>
+
+                        <View style={styles.alertButtonsRow}>
+                            <TouchableOpacity
+                                style={styles.alertCancelBtn}
+                                onPress={() => setShowDeleteModal(false)}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.alertCancelText}>{t('cancel')}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.alertDeleteBtn}
+                                onPress={handleConfirmDelete}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.alertDeleteText}>{t('delete')}</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </Animated.View>
+                </View>
+            </Modal>
         </KeyboardAvoidingView>
     );
 }
@@ -652,6 +871,14 @@ const styles = StyleSheet.create({
         height: 40,
         borderRadius: 20,
         backgroundColor: '#F5F3FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    navBtnDelete: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#FEF2F2',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -846,7 +1073,7 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
         paddingHorizontal: 16,
-        paddingTop: 24,
+        paddingTop: 10,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -5 },
         shadowOpacity: 0.1,
@@ -884,6 +1111,34 @@ const styles = StyleSheet.create({
     calcKeyFuncText: {
         color: '#8B5CF6',
         fontSize: 26,
+    },
+    calcQuickSelectRow: {
+        flexDirection: 'row',
+        gap: 12,
+        marginBottom: 16,
+    },
+    calcQuickSelectChip: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#fff',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderRadius: 14,
+        gap: 8,
+        shadowColor: '#64748B',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
+    },
+    calcQuickSelectText: {
+        fontSize: 15,
+        fontFamily: 'Prompt_600SemiBold',
+        color: '#475569',
     },
     calcBottomRows: {
         flexDirection: 'row',
@@ -940,7 +1195,7 @@ const styles = StyleSheet.create({
     manageBtn: {
         color: '#6366F1',
         fontFamily: 'Prompt_600SemiBold',
-        fontSize: 16,
+        fontSize: 13,
     },
     modalCloseBtn: {
         padding: 4,
@@ -982,13 +1237,19 @@ const styles = StyleSheet.create({
         fontFamily: 'Prompt_500Medium',
         color: '#334155',
     },
+    modalOptionSubText: {
+        fontSize: 12,
+        fontFamily: 'Prompt_400Regular',
+        color: '#94A3B8',
+        marginTop: 2,
+    },
     calcDragIndicator: {
         width: 40,
         height: 4,
         borderRadius: 2,
         backgroundColor: '#E2E8F0',
         alignSelf: 'center',
-        marginVertical: 12,
+        marginBottom: 20,
     },
     modalCancel: {
         fontSize: 16,
@@ -999,5 +1260,80 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#6366F1',
         fontFamily: 'Prompt_600SemiBold',
+    },
+    // Custom Alert Styles
+    alertOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 32,
+    },
+    alertBox: {
+        backgroundColor: '#fff',
+        borderRadius: 24,
+        padding: 24,
+        width: '100%',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.1,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    alertIconWrapper: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        backgroundColor: '#FEF2F2',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+    },
+    alertTitle: {
+        fontSize: 20,
+        fontFamily: 'Prompt_700Bold',
+        color: '#1E293B',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    alertMessage: {
+        fontSize: 15,
+        fontFamily: 'Prompt_400Regular',
+        color: '#64748B',
+        textAlign: 'center',
+        marginBottom: 24,
+        lineHeight: 22,
+    },
+    alertButtonsRow: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    alertCancelBtn: {
+        flex: 1,
+        height: 50,
+        borderRadius: 14,
+        backgroundColor: '#F1F5F9',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertCancelText: {
+        fontSize: 16,
+        fontFamily: 'Prompt_600SemiBold',
+        color: '#475569',
+    },
+    alertDeleteBtn: {
+        flex: 1,
+        height: 50,
+        borderRadius: 14,
+        backgroundColor: '#EF4444',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertDeleteText: {
+        fontSize: 16,
+        fontFamily: 'Prompt_600SemiBold',
+        color: '#fff',
     },
 });

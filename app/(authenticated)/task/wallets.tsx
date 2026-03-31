@@ -11,8 +11,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
     Dimensions,
+    Keyboard,
     KeyboardAvoidingView,
     Modal,
     PanResponder,
@@ -25,8 +25,8 @@ import {
     TouchableWithoutFeedback,
     View
 } from 'react-native';
-import Animated, { Extrapolation, FadeInDown, FadeInUp, SlideInDown, SlideOutDown, interpolate, runOnJS, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { Extrapolation, FadeInDown, FadeInUp, FadeOutDown, SlideInDown, SlideOutDown, interpolate, runOnJS, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 
 export default function Wallets() {
@@ -48,17 +48,29 @@ export default function Wallets() {
     const [selectedColor, setSelectedColor] = useState(WALLET_COLORS[0]);
     const [initialBalance, setInitialBalance] = useState('0');
 
+    // Hide FAB when keyboard shows
+    const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+    useEffect(() => {
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+        return () => { showSub.remove(); hideSub.remove(); };
+    }, []);
+
     // Swipe-to-dismiss: Reanimated shared value for translateY
     const modalTranslateY = useSharedValue(0);
     const SCREEN_HEIGHT = Dimensions.get('window').height;
     const DISMISS_THRESHOLD = 120;
 
-    const closeModal = () => setModalVisible(false);
+    const closeModal = () => {
+        setModalVisible(false);
+    };
 
     const modalPanResponder = React.useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
-            onMoveShouldSetPanResponder: (_, gs) => gs.dy > 8,
+            onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx) * 0.8,
             onPanResponderMove: (_, gs) => {
                 // Only allow dragging downward (positive dy)
                 if (gs.dy > 0) {
@@ -119,7 +131,7 @@ export default function Wallets() {
 
     const openEditModal = (wallet: Wallet) => {
         setEditingWallet(wallet);
-        setWalletName(wallet.name);
+        setWalletName(t(wallet.name as TranslationKeys));
         setSelectedIcon(wallet.icon);
         setSelectedColor(wallet.color);
         setInitialBalance(wallet.initialBalance.toString());
@@ -128,11 +140,6 @@ export default function Wallets() {
     };
 
     const handleSave = async () => {
-        if (!walletName.trim()) {
-            Alert.alert(t('error'), t('wallet_name_placeholder'));
-            return;
-        }
-
         const balance = parseFloat(initialBalance) || 0;
 
         if (editingWallet) {
@@ -209,7 +216,7 @@ export default function Wallets() {
         return {
             opacity: interpolate(
                 scrollY.value,
-                [50, 100],
+                [50, 70],
                 [0, 1],
                 Extrapolation.CLAMP
             ),
@@ -217,7 +224,7 @@ export default function Wallets() {
     });
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
+        <SafeAreaView style={[styles.container]}>
             {/* Header */}
             <View style={styles.header}>
                 <View style={{ width: 40 }} />
@@ -282,8 +289,10 @@ export default function Wallets() {
                 showsVerticalScrollIndicator={false}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
-                snapToOffsets={[0, 100]}
+                snapToOffsets={[0, 70]}
                 decelerationRate="normal"
+                snapToEnd={false}
+
 
             >
                 {/* Section Header */}
@@ -364,9 +373,10 @@ export default function Wallets() {
                                                 <Text style={styles.walletBalanceLabel}>{t('current_balance')}</Text>
                                                 <Text style={[
                                                     styles.walletBalancePremium,
-                                                    { color: isPositive ? '#1F2937' : '#EF4444' }
+                                                    { color: '#1F2937' }
                                                 ]}>
-                                                    <Text style={styles.currencyPremium}>{currencySymbol}</Text>
+
+                                                    <Text style={styles.currencyPremium}>{isPositive ? '' : '-'}{currencySymbol}</Text>
                                                     {formatNumberParts(balance).integer}
                                                     <Text style={styles.walletDecimalPremium}>.{formatNumberParts(balance).decimal}</Text>
                                                 </Text>
@@ -404,11 +414,11 @@ export default function Wallets() {
                 visible={modalVisible}
                 transparent
                 animationType="fade"
-                onRequestClose={() => setModalVisible(false)}
+                onRequestClose={closeModal}
             >
                 <View style={styles.modalOverlay}>
                     {/* Touchable Backdrop */}
-                    <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
+                    <TouchableWithoutFeedback onPress={closeModal}>
                         <View style={StyleSheet.absoluteFill}>
                             {Platform.OS === 'ios' && (
                                 <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
@@ -417,7 +427,7 @@ export default function Wallets() {
                     </TouchableWithoutFeedback>
 
                     <KeyboardAvoidingView
-                        behavior={Platform.OS === "ios" ? "padding" : "height"}
+                        behavior={Platform.OS === "ios" ? "padding" : undefined}
                         style={styles.keyboardAvoidingView}
                     >
                         <Animated.View
@@ -433,7 +443,10 @@ export default function Wallets() {
                             <ScrollView
                                 style={styles.scrollViewContent}
                                 showsVerticalScrollIndicator={true}
-                                contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+                                keyboardShouldPersistTaps="handled"
+                                keyboardDismissMode="on-drag"
+                                nestedScrollEnabled
+                                contentContainerStyle={{ flexGrow: 1, paddingBottom: insets.bottom + 100 }}
                             >
                                 {/* Preview Card */}
                                 <View style={styles.previewSection}>
@@ -568,24 +581,32 @@ export default function Wallets() {
                             </ScrollView>
 
                             {/* FAB Submit Button */}
-                            <Animated.View
-                                entering={FadeInUp.delay(300).springify()}
-                                style={[styles.fabContainer, { bottom: Math.max(insets.bottom, 20) }]}
-                            >
-                                <TouchableOpacity style={styles.fab} onPress={handleSave} activeOpacity={0.85}>
-                                    <LinearGradient
-                                        colors={['#6366F1', '#8B5CF6']}
-                                        start={{ x: 0, y: 0 }}
-                                        end={{ x: 1, y: 1 }}
-                                        style={styles.fabGradient}
+                            {!isKeyboardVisible && (
+                                <Animated.View
+                                    entering={FadeInUp.delay(50).springify()}
+                                    exiting={FadeOutDown.duration(50)}
+                                    style={[styles.fabContainer, { bottom: Math.max(insets.bottom, 20) }]}
+                                >
+                                    <TouchableOpacity
+                                        style={styles.fab}
+                                        onPress={handleSave}
+                                        activeOpacity={0.85}
+                                        disabled={!walletName.trim()}
                                     >
-                                        <Ionicons name={editingWallet ? "checkmark" : "add"} size={22} color="#fff" style={{ marginRight: 6 }} />
-                                        <Text style={styles.fabText}>
-                                            {editingWallet ? t('edit_wallet') : t('save_wallet')}
-                                        </Text>
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                            </Animated.View>
+                                        <LinearGradient
+                                            colors={walletName.trim() ? ['#6366F1', '#8B5CF6'] : ['#E2E8F0', '#CBD5E1']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 1, y: 1 }}
+                                            style={styles.fabGradient}
+                                        >
+                                            <Ionicons name={editingWallet ? "checkmark" : "add"} size={22} color={walletName.trim() ? "#fff" : "#94A3B8"} style={{ marginRight: 6 }} />
+                                            <Text style={[styles.fabText, !walletName.trim() && { color: "#94A3B8" }]}>
+                                                {editingWallet ? t('edit_wallet') : t('save_wallet')}
+                                            </Text>
+                                        </LinearGradient>
+                                    </TouchableOpacity>
+                                </Animated.View>
+                            )}
                         </Animated.View>
                     </KeyboardAvoidingView>
                 </View>
@@ -637,7 +658,7 @@ export default function Wallets() {
                     </View>
                 </TouchableWithoutFeedback>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -728,8 +749,8 @@ const styles = StyleSheet.create({
         marginRight: 2,
     },
     collapsedAmount: {
-        fontSize: 24,
-        fontFamily: 'Prompt_500Medium',
+        fontSize: 20,
+        fontFamily: 'Prompt_600SemiBold',
         color: '#fff',
     },
 
@@ -779,7 +800,7 @@ const styles = StyleSheet.create({
     },
     totalAmount: {
         fontSize: 29,
-        fontFamily: 'Prompt_500Medium',
+        fontFamily: 'Prompt_600SemiBold',
         color: '#fff',
         letterSpacing: -1,
     },
@@ -825,14 +846,17 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
-        backgroundColor: '#6366F1' + '10',
         paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingVertical: 7,
         borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#6366F1',
+        backgroundColor: '#EEF2FF',
+        marginLeft: 8,
     },
     addSmallButtonText: {
         fontSize: 13,
-        fontFamily: 'Prompt_500Medium',
+        fontFamily: 'Prompt_600SemiBold',
         color: '#6366F1',
     },
 
@@ -933,17 +957,17 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     walletBalancePremium: {
-        fontSize: 20,
+        fontSize: 17,
         fontFamily: 'Prompt_500Medium',
         letterSpacing: -0.5,
     },
     currencyPremium: {
-        fontSize: 14,
+        fontSize: 11,
         color: '#94A3B8',
         fontFamily: 'Prompt_500Medium',
     },
     walletDecimalPremium: {
-        fontSize: 14,
+        fontSize: 12,
         color: '#94A3B8',
         fontFamily: 'Prompt_500Medium',
         letterSpacing: -0.5,
@@ -1032,7 +1056,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
-        height: '90%',
+        maxHeight: '90%',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -10 },
         shadowOpacity: 0.1,
@@ -1057,7 +1081,6 @@ const styles = StyleSheet.create({
 
 
     scrollViewContent: {
-        flex: 1,
         paddingHorizontal: 24,
     },
 

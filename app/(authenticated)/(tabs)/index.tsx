@@ -175,9 +175,6 @@ export default function Home() {
                         <Text style={styles.title}>{user?.firstName || user?.username || 'My Wallet'}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', gap: 12 }}>
-                        <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/')}>
-                            <Ionicons name="star-outline" size={23} color="#333" />
-                        </TouchableOpacity>
                         <TouchableOpacity style={styles.addButton} onPress={() => router.push('/task/notifications')}>
                             <Ionicons name="notifications-outline" size={23} color="#fff" />
                             {notificationCount > 0 && (
@@ -285,7 +282,7 @@ export default function Home() {
                             transactions={transactions}
                             categories={categories}
                             currencySymbol={currencySymbol}
-                            onPress={(id) => router.push({ pathname: '/task/edit-transaction', params: { id } })}
+                            onPress={(id) => router.push({ pathname: '/task/add-transaction', params: { id } })}
                             onViewAll={() => router.push('/task/transactions')}
                         />
 
@@ -400,9 +397,7 @@ const styles = StyleSheet.create({
         top: 60,
         left: 120,
     },
-    blurOverlay: {
-        ...StyleSheet.absoluteFillObject,
-    },
+
     glassOverlay: {
         ...StyleSheet.absoluteFillObject,
         backgroundColor: '#FFFFFF0D',

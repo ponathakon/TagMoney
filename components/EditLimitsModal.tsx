@@ -128,7 +128,7 @@ export const EditLimitsModal = ({
                                 </View>
                             </View>
 
-                            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+                            <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
                                 {activeTab === 'general' ? (
                                     <>
                                         <View style={styles.inputCard}>

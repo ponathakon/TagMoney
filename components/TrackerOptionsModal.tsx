@@ -252,12 +252,14 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontFamily: 'Prompt_700Bold',
         color: '#1F2937',
+        textAlign: 'center',
     },
     optionDesc: {
         fontSize: 11,
         color: '#9CA3AF',
         marginTop: 2,
         fontFamily: 'Prompt_400Regular',
+        textAlign: 'center',
     },
     closeButton: {
         paddingVertical: 14,

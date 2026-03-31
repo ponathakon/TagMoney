@@ -16,7 +16,7 @@ interface CategoryBarChartProps {
     type: 'income' | 'expense';
 }
 
-type TimeRange = '1D' | '1W' | '1M' | '1Y';
+type TimeRange = '1D' | '1W' | '1M' | '1Y' | 'ALL';
 
 export const CategoryBarChart = ({ transactions, type }: CategoryBarChartProps) => {
     const [allCategories, setAllCategories] = useState<Category[]>([]);
@@ -62,11 +62,16 @@ export const CategoryBarChart = ({ transactions, type }: CategoryBarChartProps) 
             case '1Y':
                 startDate.setFullYear(now.getFullYear() - 1);
                 break;
+            case 'ALL':
+                startDate = new Date(0);
+                break;
         }
 
         const filtered = transactions.filter(t => {
             const tDate = new Date(t.date);
             if (t.type !== type) return false;
+
+            if (selectedRange === 'ALL') return true;
 
             // For '1D', we need to check if it matches today exactly, handling time if stored
             if (selectedRange === '1D') {
@@ -128,7 +133,7 @@ export const CategoryBarChart = ({ transactions, type }: CategoryBarChartProps) 
     const renderHeader = () => (
         <View style={styles.header}>
             <View style={styles.segmentedControl}>
-                {(['1D', '1W', '1M', '1Y'] as TimeRange[]).map((range) => (
+                {(['1D', '1W', '1M', '1Y', 'ALL'] as TimeRange[]).map((range) => (
                     <TouchableOpacity
                         key={range}
                         style={[styles.segmentBtn, selectedRange === range && styles.activeSegmentBtn]}
@@ -179,7 +184,7 @@ export const CategoryBarChart = ({ transactions, type }: CategoryBarChartProps) 
             </View>
 
             <View style={styles.listContainer}>
-                {categoryList.slice(0, 5).map((item, index) => (
+                {categoryList.map((item, index) => (
                     <View key={item.id} style={styles.listItem}>
                         <View style={styles.itemLeft}>
                             <View style={[styles.iconContainer, { backgroundColor: item.color + '20' }]}>

@@ -5,14 +5,9 @@ export default function AuthLayout() {
         <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 
-            <Stack.Screen name="task/edit-transaction" options={{
-                animation: 'slide_from_bottom',
-                animationDuration: 10,
-                headerShown: false,
-            }} />
 
             <Stack.Screen name="task/transactions" options={{
-                animation: 'slide_from_bottom',
+                animation: 'slide_from_right',
                 animationDuration: 10,
                 headerShown: false,
             }} />
