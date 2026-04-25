@@ -72,6 +72,7 @@ export default function AddTransaction() {
 
     // Calculator Keyboard State
     const [showCalcKeyboard, setShowCalcKeyboard] = useState(!isEditing); // visible by default for add, hidden for edit
+    const [isSystemKeyboardVisible, setIsSystemKeyboardVisible] = useState(false);
     const amountInputRef = useRef<TextInput>(null);
 
     // Category and Wallet Modal State
@@ -106,7 +107,6 @@ export default function AddTransaction() {
                     calcTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 200 });
                     setTimeout(() => {
                         dismissCalculator();
-                        setShowCalcKeyboard(false);
                         // Reset on next tick so component is unmounted first
                         setTimeout(() => { calcTranslateY.value = 0; }, 50);
                     }, 200);
@@ -121,7 +121,6 @@ export default function AddTransaction() {
         transform: [{ translateY: calcTranslateY.value }]
     }));
 
-
     // Data state
     const [allCategories, setAllCategories] = useState<Category[]>([]);
     const [wallets, setWallets] = useState<Wallet[]>([]);
@@ -134,9 +133,14 @@ export default function AddTransaction() {
         // Hide our custom calc keyboard if the system keyboard shows up (e.g. Note input)
         const kbDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
             setShowCalcKeyboard(false);
+            setIsSystemKeyboardVisible(true);
+        });
+        const kbDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+            setIsSystemKeyboardVisible(false);
         });
         return () => {
             kbDidShowListener.remove();
+            kbDidHideListener.remove();
         };
     }, [id]);
 
@@ -309,9 +313,8 @@ export default function AddTransaction() {
     const headerColor = type === 'income' ? '#10B981' : '#EF4444';
 
     return (
-        <KeyboardAvoidingView
+        <View
             style={styles.container}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
             {/* Custom Header Area */}
             <View style={[styles.topHeader, { paddingTop: insets.top + 10 }]}>
@@ -342,7 +345,6 @@ export default function AddTransaction() {
                         onPress={() => {
                             Keyboard.dismiss();
                             setShowCalcKeyboard(true);
-                            amountInputRef.current?.focus();
                         }}
                     >
                         <Text style={[styles.currencySymbolLarge, { color: headerColor }, !amount && { opacity: 0.4 }]}>{currencySymbol}</Text>
@@ -372,140 +374,151 @@ export default function AddTransaction() {
                 </View>
             </View>
 
-            {/* Scrollable Form Content */}
-            <ScrollView
-                style={styles.scrollView}
-                contentContainerStyle={{ paddingBottom: showCalcKeyboard ? 340 : insets.bottom + 100 }}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                onScrollBeginDrag={() => {
-                    Keyboard.dismiss();
-                    setShowCalcKeyboard(false);
-                }}
+
+            <KeyboardAvoidingView
+                style={styles.wrapScroll}
+                behavior="padding"
+                keyboardVerticalOffset={25}
             >
-                <View style={styles.formContent}>
 
-                    {/* Type Selector */}
-                    <View style={styles.typeSelectorContainer}>
-                        <TouchableOpacity
-                            style={[styles.typeBtn, type === 'expense' && styles.typeBtnExpenseActive]}
-                            onPress={() => { setType('expense'); setSelectedCategory(null); }}
-                        >
-                            <Text style={[styles.typeBtnText, type === 'expense' && styles.typeBtnTextActive]}>{t('expense')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.typeBtn, type === 'income' && styles.typeBtnIncomeActive]}
-                            onPress={() => { setType('income'); setSelectedCategory(null); }}
-                        >
-                            <Text style={[styles.typeBtnText, type === 'income' && styles.typeBtnTextActive]}>{t('income')}</Text>
-                        </TouchableOpacity>
-                    </View>
+                {/* Scrollable Form Content */}
+                <ScrollView
+                    style={styles.wrapScroll}
+                    contentContainerStyle={{ paddingBottom: showCalcKeyboard ? 340 : insets.bottom + 100 }}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                    onScrollBeginDrag={() => {
+                        Keyboard.dismiss();
+                        setShowCalcKeyboard(false);
+                    }}
+                >
+                    <View style={styles.formContent}>
 
-                    {/* Date Picker */}
-                    <View style={styles.inputGroup}>
-                        <Text style={styles.label}>{t('date')}</Text>
-                        <TouchableOpacity style={styles.inputCard} onPress={() => setShowDatePicker(true)}>
-                            <Ionicons name="calendar-outline" size={20} color="#64748B" style={styles.inputIcon} />
-                            <Text style={styles.inputText}>{formatDate(selectedDate, t, languageCode)}</Text>
-                            <Ionicons name="chevron-down" size={18} color="#94A3B8" />
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Category Selection */}
-                    <View style={styles.inputGroup}>
-                        <View style={styles.labelRow}>
-                            <Text style={styles.label}>{t('category')}</Text>
-                            <TouchableOpacity onPress={() => router.push('/task/categories')}>
-                                <Text style={styles.manageBtn}>{t('manage')}</Text>
+                        {/* Type Selector */}
+                        <View style={styles.typeSelectorContainer}>
+                            <TouchableOpacity
+                                style={[styles.typeBtn, type === 'expense' && styles.typeBtnExpenseActive]}
+                                onPress={() => { setType('expense'); setSelectedCategory(null); }}
+                            >
+                                <Text style={[styles.typeBtnText, type === 'expense' && styles.typeBtnTextActive]}>{t('expense')}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.typeBtn, type === 'income' && styles.typeBtnIncomeActive]}
+                                onPress={() => { setType('income'); setSelectedCategory(null); }}
+                            >
+                                <Text style={[styles.typeBtnText, type === 'income' && styles.typeBtnTextActive]}>{t('income')}</Text>
                             </TouchableOpacity>
                         </View>
-                        <TouchableOpacity
-                            style={styles.inputCard}
-                            onPress={() => {
-                                Keyboard.dismiss();
-                                setShowCalcKeyboard(false);
-                                setShowCategoryModal(true);
-                            }}
-                        >
-                            {selectedCategory ? (() => {
-                                const cat = categories.find(c => c.id === selectedCategory);
-                                if (!cat) return null;
-                                return (
-                                    <>
-                                        <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: cat.color + '20' }]}>
-                                            <Ionicons name={cat.icon as any} size={18} color={cat.color} />
-                                        </View>
-                                        <Text style={styles.inputText}>{t(cat.name as TranslationKeys)}</Text>
-                                    </>
-                                );
-                            })() : (
-                                <>
-                                    <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' }]}>
-                                        <Ionicons name="help" size={18} color="#94A3B8" />
-                                    </View>
-                                    <Text style={[styles.inputText, { color: '#94A3B8' }]}>{t('select_category')}</Text>
-                                </>
-                            )}
-                            <Ionicons name="chevron-down" size={20} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
-                        </TouchableOpacity>
-                    </View>
 
-                    {/* Wallet Selection */}
-                    <View style={styles.inputGroup}>
-                        <View style={styles.labelRow}>
-                            <Text style={styles.label}>{t('wallet')}</Text>
-                            <TouchableOpacity onPress={() => router.push('/task/wallets')}>
-                                <Text style={styles.manageBtn}>{t('manage')}</Text>
+                        {/* Date Picker */}
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>{t('date')}</Text>
+                            <TouchableOpacity style={styles.inputCard} onPress={() => setShowDatePicker(true)}>
+                                <Ionicons name="calendar-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                                <Text style={styles.inputText}>{formatDate(selectedDate, t, languageCode)}</Text>
+                                <Ionicons name="chevron-down" size={18} color="#94A3B8" />
                             </TouchableOpacity>
                         </View>
-                        <TouchableOpacity
-                            style={styles.inputCard}
-                            onPress={() => {
-                                Keyboard.dismiss();
-                                setShowCalcKeyboard(false);
-                                setShowWalletModal(true);
-                            }}
-                        >
-                            {selectedWallet ? (() => {
-                                const w = wallets.find(wall => wall.id === selectedWallet);
-                                if (!w) return null;
-                                return (
-                                    <>
-                                        <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: w.color + '20' }]}>
-                                            <Ionicons name={w.icon as any} size={18} color={w.color} />
-                                        </View>
-                                        <Text style={styles.inputText}>{t(w.name as TranslationKeys)}</Text>
-                                    </>
-                                );
-                            })() : (
-                                <>
-                                    <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' }]}>
-                                        <Ionicons name="wallet" size={18} color="#94A3B8" />
-                                    </View>
-                                    <Text style={[styles.inputText, { color: '#94A3B8' }]}>{t('select_wallet')}</Text>
-                                </>
-                            )}
-                            <Ionicons name="chevron-down" size={20} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
-                        </TouchableOpacity>
-                    </View>
 
-                    {/* Note Input */}
-                    <View style={[styles.inputGroup, { marginBottom: 40 }]}>
-                        <Text style={styles.label}>{t('note')}</Text>
-                        <View style={styles.inputCard}>
-                            <Ionicons name="document-text-outline" size={20} color="#64748B" style={styles.inputIcon} />
-                            <TextInput
-                                style={styles.noteInput}
-                                value={description}
-                                onChangeText={setDescription}
-                                placeholder={t('add_a_note')}
-                                placeholderTextColor="#94A3B8"
-                                onFocus={() => setShowCalcKeyboard(false)}
-                            />
+                        {/* Category Selection */}
+                        <View style={styles.inputGroup}>
+                            <View style={styles.labelRow}>
+                                <Text style={styles.label}>{t('category')}</Text>
+                                <TouchableOpacity onPress={() => router.push('/task/categories')}>
+                                    <Text style={styles.manageBtn}>{t('manage')}</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.inputCard}
+                                onPress={() => {
+                                    Keyboard.dismiss();
+                                    setShowCalcKeyboard(false);
+                                    setShowCategoryModal(true);
+                                }}
+                            >
+                                {selectedCategory ? (() => {
+                                    const cat = categories.find(c => c.id === selectedCategory);
+                                    if (!cat) return null;
+                                    return (
+                                        <>
+                                            <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: cat.color + '20' }]}>
+                                                <Ionicons name={cat.icon as any} size={18} color={cat.color} />
+                                            </View>
+                                            <Text style={styles.inputText}>{t(cat.name as TranslationKeys)}</Text>
+                                        </>
+                                    );
+                                })() : (
+                                    <>
+                                        <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' }]}>
+                                            <Ionicons name="help" size={18} color="#94A3B8" />
+                                        </View>
+                                        <Text style={[styles.inputText, { color: '#94A3B8' }]}>{t('select_category')}</Text>
+                                    </>
+                                )}
+                                <Ionicons name="chevron-down" size={20} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Wallet Selection */}
+                        <View style={styles.inputGroup}>
+                            <View style={styles.labelRow}>
+                                <Text style={styles.label}>{t('wallet')}</Text>
+                                <TouchableOpacity onPress={() => router.push('/task/wallets')}>
+                                    <Text style={styles.manageBtn}>{t('manage')}</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.inputCard}
+                                onPress={() => {
+                                    Keyboard.dismiss();
+                                    setShowCalcKeyboard(false);
+                                    setShowWalletModal(true);
+                                }}
+                            >
+                                {selectedWallet ? (() => {
+                                    const w = wallets.find(wall => wall.id === selectedWallet);
+                                    if (!w) return null;
+                                    return (
+                                        <>
+                                            <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: w.color + '20' }]}>
+                                                <Ionicons name={w.icon as any} size={18} color={w.color} />
+                                            </View>
+                                            <Text style={styles.inputText}>{t(w.name as TranslationKeys)}</Text>
+                                        </>
+                                    );
+                                })() : (
+                                    <>
+                                        <View style={[styles.inputIcon, { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9' }]}>
+                                            <Ionicons name="wallet" size={18} color="#94A3B8" />
+                                        </View>
+                                        <Text style={[styles.inputText, { color: '#94A3B8' }]}>{t('select_wallet')}</Text>
+                                    </>
+                                )}
+                                <Ionicons name="chevron-down" size={20} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Note Input */}
+                        <View style={[styles.inputGroup, { marginBottom: 40 }]}>
+                            <Text style={styles.label}>{t('note')}</Text>
+                            <View style={styles.inputCard}>
+                                <Ionicons name="document-text-outline" size={20} color="#64748B" style={styles.inputIcon} />
+                                <TextInput
+                                    style={styles.noteInput}
+                                    value={description}
+                                    onChangeText={setDescription}
+                                    placeholder={t('add_a_note')}
+                                    placeholderTextColor="#94A3B8"
+                                    onFocus={() => setShowCalcKeyboard(false)}
+                                />
+                            </View>
                         </View>
                     </View>
-                </View>
-            </ScrollView>
+                </ScrollView>
+            </KeyboardAvoidingView>
+
+
 
             {/* Category Bottom Sheet Modal */}
             <Modal visible={showCategoryModal} transparent animationType="fade">
@@ -630,45 +643,43 @@ export default function AddTransaction() {
                         <View style={styles.calcDragIndicator} />
 
                         {/* Quick Select Row (Category & Wallet) */}
-                        <View style={styles.calcQuickSelectRow}>
-                            <TouchableOpacity
-                                style={styles.calcQuickSelectChip}
-                                onPress={() => {
-                                    setShowCategoryModal(true);
-                                }}
-                                activeOpacity={0.6}
-                            >
-                                <Ionicons
-                                    name={selectedCategory ? categories.find(c => c.id === selectedCategory)?.icon as any || 'folder-outline' : 'folder-outline'}
-                                    size={18}
-                                    color={selectedCategory ? categories.find(c => c.id === selectedCategory)?.color : '#64748B'}
-                                />
-                                <Text style={styles.calcQuickSelectText} numberOfLines={1}>
-                                    {selectedCategory
-                                        ? t(categories.find(c => c.id === selectedCategory)?.name as TranslationKeys)
-                                        : t('category')}
-                                </Text>
-                            </TouchableOpacity>
+                        {(() => {
+                            const selectedCat = selectedCategory ? categories.find(c => c.id === selectedCategory) : null;
+                            const selectedWal = selectedWallet ? wallets.find(w => w.id === selectedWallet) : null;
+                            return (
+                                <View style={styles.calcQuickSelectRow}>
+                                    <TouchableOpacity
+                                        style={styles.calcQuickSelectChip}
+                                        onPress={() => setShowCategoryModal(true)}
+                                        activeOpacity={0.6}
+                                    >
+                                        <Ionicons
+                                            name={selectedCat?.icon as any || 'folder-outline'}
+                                            size={18}
+                                            color={selectedCat?.color || '#64748B'}
+                                        />
+                                        <Text style={styles.calcQuickSelectText} numberOfLines={1}>
+                                            {selectedCat ? t(selectedCat.name as TranslationKeys) : t('category')}
+                                        </Text>
+                                    </TouchableOpacity>
 
-                            <TouchableOpacity
-                                style={styles.calcQuickSelectChip}
-                                onPress={() => {
-                                    setShowWalletModal(true);
-                                }}
-                                activeOpacity={0.6}
-                            >
-                                <Ionicons
-                                    name={selectedWallet ? wallets.find(w => w.id === selectedWallet)?.icon as any : 'wallet-outline'}
-                                    size={18}
-                                    color={selectedWallet ? wallets.find(w => w.id === selectedWallet)?.color : '#64748B'}
-                                />
-                                <Text style={styles.calcQuickSelectText} numberOfLines={1}>
-                                    {selectedWallet
-                                        ? t(wallets.find(w => w.id === selectedWallet)?.name as TranslationKeys)
-                                        : t('wallet')}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
+                                    <TouchableOpacity
+                                        style={styles.calcQuickSelectChip}
+                                        onPress={() => setShowWalletModal(true)}
+                                        activeOpacity={0.6}
+                                    >
+                                        <Ionicons
+                                            name={selectedWal?.icon as any || 'wallet-outline'}
+                                            size={18}
+                                            color={selectedWal?.color || '#64748B'}
+                                        />
+                                        <Text style={styles.calcQuickSelectText} numberOfLines={1}>
+                                            {selectedWal ? t(selectedWal.name as TranslationKeys) : t('wallet')}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            );
+                        })()}
 
                         {/* Row 1: C ÷ × ⌫ */}
                         <View style={styles.calcRow}>
@@ -798,7 +809,7 @@ export default function AddTransaction() {
             )}
 
             {/* Save Button (Fixed at bottom only when calculator is hidden) */}
-            {!showCalcKeyboard && (
+            {!showCalcKeyboard && !isSystemKeyboardVisible && (
                 <Animated.View entering={FadeInDown.duration(150).delay(100)} style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
                     <TouchableOpacity
                         style={[styles.saveButton, (!selectedCategory || !selectedWallet || getCalculatedAmount() <= 0) && styles.saveButtonDisabled]}
@@ -845,7 +856,7 @@ export default function AddTransaction() {
                     </Animated.View>
                 </View>
             </Modal>
-        </KeyboardAvoidingView>
+        </View>
     );
 }
 
@@ -935,9 +946,10 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
 
-    scrollView: {
+    wrapScroll: {
         flex: 1,
     },
+
     formContent: {
         padding: 20,
         paddingTop: 32,

@@ -442,7 +442,7 @@ export default function Wallets() {
 
                             <ScrollView
                                 style={styles.scrollViewContent}
-                                showsVerticalScrollIndicator={true}
+                                showsVerticalScrollIndicator={false}
                                 keyboardShouldPersistTaps="handled"
                                 keyboardDismissMode="on-drag"
                                 nestedScrollEnabled

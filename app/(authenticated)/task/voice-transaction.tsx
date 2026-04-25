@@ -25,6 +25,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import Animated, {
     Easing,
     FadeInDown,
@@ -513,116 +514,147 @@ export default function VoiceTransaction() {
                 {parsedTransactions.length} {parsedTransactions.length !== 1 ? t('transactions_found') : t('transaction_found')}
             </Text>
 
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                style={{ flex: 1 }}
-                keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
+            <KeyboardAwareScrollView
+                style={styles.reviewScroll}
+                contentContainerStyle={{ paddingBottom: 160 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                enableOnAndroid={true}
+                extraScrollHeight={80}
             >
-                <ScrollView
-                    style={styles.reviewScroll}
-                    contentContainerStyle={{ paddingBottom: 160 }}
-                    showsVerticalScrollIndicator={false}
-                >
-                    {parsedTransactions.map((pt, idx) => (
-                        <Animated.View
-                            key={pt.id}
-                            entering={FadeInDown.delay(200 + idx * 100).springify()}
-                            style={styles.txCard}
+                {parsedTransactions.map((pt, idx) => (
+                    <Animated.View
+                        key={pt.id}
+                        entering={FadeInDown.delay(200 + idx * 100).springify()}
+                        style={styles.txCard}
+                    >
+                        {/* Delete button */}
+                        <TouchableOpacity
+                            style={styles.txDeleteBtn}
+                            onPress={() => removeTransaction(pt.id)}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                            {/* Delete button */}
+                            <Ionicons name="close-circle" size={22} color="#CBD5E1" />
+                        </TouchableOpacity>
+
+                        {/* Type Toggle */}
+                        <View style={styles.txTypeRow}>
                             <TouchableOpacity
-                                style={styles.txDeleteBtn}
-                                onPress={() => removeTransaction(pt.id)}
-                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                style={[styles.txTypePill, pt.type === 'expense' && styles.txTypePillActiveExpense]}
+                                onPress={() => updateTransaction(pt.id, {
+                                    type: 'expense',
+                                    categoryId: null,
+                                    categoryName: null,
+                                    categoryIcon: null,
+                                    categoryColor: null,
+                                })}
                             >
-                                <Ionicons name="close-circle" size={22} color="#CBD5E1" />
+                                <Text style={[styles.txTypePillText, pt.type === 'expense' && styles.txTypePillTextActive]}>
+                                    {t('expense')}
+                                </Text>
                             </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.txTypePill, pt.type === 'income' && styles.txTypePillActiveIncome]}
+                                onPress={() => updateTransaction(pt.id, {
+                                    type: 'income',
+                                    categoryId: null,
+                                    categoryName: null,
+                                    categoryIcon: null,
+                                    categoryColor: null,
+                                })}
+                            >
+                                <Text style={[styles.txTypePillText, pt.type === 'income' && styles.txTypePillTextActive]}>
+                                    {t('income')}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
 
-                            {/* Type Toggle */}
-                            <View style={styles.txTypeRow}>
-                                <TouchableOpacity
-                                    style={[styles.txTypePill, pt.type === 'expense' && styles.txTypePillActiveExpense]}
-                                    onPress={() => updateTransaction(pt.id, {
-                                        type: 'expense',
-                                        categoryId: null,
-                                        categoryName: null,
-                                        categoryIcon: null,
-                                        categoryColor: null,
-                                    })}
-                                >
-                                    <Text style={[styles.txTypePillText, pt.type === 'expense' && styles.txTypePillTextActive]}>
-                                        {t('expense')}
-                                    </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.txTypePill, pt.type === 'income' && styles.txTypePillActiveIncome]}
-                                    onPress={() => updateTransaction(pt.id, {
-                                        type: 'income',
-                                        categoryId: null,
-                                        categoryName: null,
-                                        categoryIcon: null,
-                                        categoryColor: null,
-                                    })}
-                                >
-                                    <Text style={[styles.txTypePillText, pt.type === 'income' && styles.txTypePillTextActive]}>
-                                        {t('income')}
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
+                        {/* Amount */}
+                        <View style={styles.txAmountRow}>
+                            <Text style={styles.txCurrency}>{currencySymbol}</Text>
+                            <TextInput
+                                style={styles.txAmountInput}
+                                value={pt.amount.toString()}
+                                onChangeText={v => {
+                                    const n = parseFloat(v) || 0;
+                                    updateTransaction(pt.id, { amount: n });
+                                }}
+                                keyboardType="numeric"
+                                selectTextOnFocus
+                            />
+                        </View>
 
-                            {/* Amount */}
-                            <View style={styles.txAmountRow}>
-                                <Text style={styles.txCurrency}>{currencySymbol}</Text>
-                                <TextInput
-                                    style={styles.txAmountInput}
-                                    value={pt.amount.toString()}
-                                    onChangeText={v => {
-                                        const n = parseFloat(v) || 0;
-                                        updateTransaction(pt.id, { amount: n });
-                                    }}
-                                    keyboardType="numeric"
-                                    selectTextOnFocus
-                                />
-                            </View>
+                        {/* Date Selector */}
+                        <View style={styles.txDateRow}>
+                            <Text style={styles.txSectionLabel}>{t('date')}</Text>
+                            <TouchableOpacity
+                                style={styles.dateButtonCompact}
+                                onPress={() => {
+                                    setEditingTxId(pt.id);
+                                    setShowDatePicker(true);
+                                }}
+                            >
+                                <Ionicons name="calendar-outline" size={16} color="#6366F1" />
+                                <Text style={styles.dateTextCompact}>{formatDate(pt.date, t, languageCode)}</Text>
+                                <Ionicons name="chevron-down" size={16} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
+                            </TouchableOpacity>
+                        </View>
 
-                            {/* Date Selector */}
-                            <View style={styles.txDateRow}>
-                                <Text style={styles.txSectionLabel}>{t('date')}</Text>
+                        {/* Category & Wallet Modal Triggers */}
+                        <View style={styles.txSelectorsRow}>
+                            <View style={styles.txSelectorColumn}>
+                                <Text style={styles.txSectionLabel}>{t('category')}</Text>
                                 <TouchableOpacity
-                                    style={styles.dateButtonCompact}
+                                    style={styles.selectorButton}
                                     onPress={() => {
                                         setEditingTxId(pt.id);
-                                        setShowDatePicker(true);
+                                        setShowCategoryModal(true);
                                     }}
                                 >
-                                    <Ionicons name="calendar-outline" size={16} color="#6366F1" />
-                                    <Text style={styles.dateTextCompact}>{formatDate(pt.date, t, languageCode)}</Text>
+                                    {pt.categoryId ? (
+                                        <>
+                                            <View style={[styles.selectorIconBg, { backgroundColor: (pt.categoryColor || '#94A3B8') + '20' }]}>
+                                                <Ionicons name={(pt.categoryIcon as any) || 'list'} size={16} color={pt.categoryColor || '#94A3B8'} />
+                                            </View>
+                                            <Text style={styles.selectorTextActive} numberOfLines={1}>{pt.categoryName ? t(pt.categoryName as TranslationKeys) : ''}</Text>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <View style={[styles.selectorIconBg, { backgroundColor: '#F1F5F9' }]}>
+                                                <Ionicons name="help" size={16} color="#94A3B8" />
+                                            </View>
+                                            <Text style={styles.selectorTextInactive}>{t('select')}...</Text>
+                                        </>
+                                    )}
                                     <Ionicons name="chevron-down" size={16} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Category & Wallet Modal Triggers */}
-                            <View style={styles.txSelectorsRow}>
+                            {wallets.length > 0 && (
                                 <View style={styles.txSelectorColumn}>
-                                    <Text style={styles.txSectionLabel}>{t('category')}</Text>
+                                    <Text style={styles.txSectionLabel}>{t('wallet')}</Text>
                                     <TouchableOpacity
                                         style={styles.selectorButton}
                                         onPress={() => {
                                             setEditingTxId(pt.id);
-                                            setShowCategoryModal(true);
+                                            setShowWalletModal(true);
                                         }}
                                     >
-                                        {pt.categoryId ? (
-                                            <>
-                                                <View style={[styles.selectorIconBg, { backgroundColor: (pt.categoryColor || '#94A3B8') + '20' }]}>
-                                                    <Ionicons name={(pt.categoryIcon as any) || 'list'} size={16} color={pt.categoryColor || '#94A3B8'} />
-                                                </View>
-                                                <Text style={styles.selectorTextActive} numberOfLines={1}>{pt.categoryName ? t(pt.categoryName as TranslationKeys) : ''}</Text>
-                                            </>
-                                        ) : (
+                                        {pt.walletId ? (() => {
+                                            const w = wallets.find(x => x.id === pt.walletId);
+                                            if (!w) return null;
+                                            return (
+                                                <>
+                                                    <View style={[styles.selectorIconBg, { backgroundColor: w.color + '20' }]}>
+                                                        <Ionicons name={w.icon as any} size={16} color={w.color} />
+                                                    </View>
+                                                    <Text style={styles.selectorTextActive} numberOfLines={1}>{t(w.name as TranslationKeys)}</Text>
+                                                </>
+                                            );
+                                        })() : (
                                             <>
                                                 <View style={[styles.selectorIconBg, { backgroundColor: '#F1F5F9' }]}>
-                                                    <Ionicons name="help" size={16} color="#94A3B8" />
+                                                    <Ionicons name="wallet-outline" size={16} color="#94A3B8" />
                                                 </View>
                                                 <Text style={styles.selectorTextInactive}>{t('select')}...</Text>
                                             </>
@@ -630,61 +662,27 @@ export default function VoiceTransaction() {
                                         <Ionicons name="chevron-down" size={16} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
                                     </TouchableOpacity>
                                 </View>
-
-                                {wallets.length > 0 && (
-                                    <View style={styles.txSelectorColumn}>
-                                        <Text style={styles.txSectionLabel}>{t('wallet')}</Text>
-                                        <TouchableOpacity
-                                            style={styles.selectorButton}
-                                            onPress={() => {
-                                                setEditingTxId(pt.id);
-                                                setShowWalletModal(true);
-                                            }}
-                                        >
-                                            {pt.walletId ? (() => {
-                                                const w = wallets.find(x => x.id === pt.walletId);
-                                                if (!w) return null;
-                                                return (
-                                                    <>
-                                                        <View style={[styles.selectorIconBg, { backgroundColor: w.color + '20' }]}>
-                                                            <Ionicons name={w.icon as any} size={16} color={w.color} />
-                                                        </View>
-                                                        <Text style={styles.selectorTextActive} numberOfLines={1}>{t(w.name as TranslationKeys)}</Text>
-                                                    </>
-                                                );
-                                            })() : (
-                                                <>
-                                                    <View style={[styles.selectorIconBg, { backgroundColor: '#F1F5F9' }]}>
-                                                        <Ionicons name="wallet-outline" size={16} color="#94A3B8" />
-                                                    </View>
-                                                    <Text style={styles.selectorTextInactive}>{t('select')}...</Text>
-                                                </>
-                                            )}
-                                            <Ionicons name="chevron-down" size={16} color="#CBD5E1" style={{ marginLeft: 'auto' }} />
-                                        </TouchableOpacity>
-                                    </View>
-                                )}
-                            </View>
-
-                            {/* Note */}
-                            <TextInput
-                                style={styles.txNoteInput}
-                                value={pt.description}
-                                onChangeText={v => updateTransaction(pt.id, { description: v })}
-                                placeholder={t('add_note')}
-                                placeholderTextColor="#CBD5E1"
-                            />
-                        </Animated.View>
-                    ))}
-
-                    {parsedTransactions.length === 0 && (
-                        <View style={styles.emptyReview}>
-                            <Ionicons name="alert-circle-outline" size={48} color="#CBD5E1" />
-                            <Text style={styles.emptyReviewText}>{t('no_transactions_detected')}</Text>
+                            )}
                         </View>
-                    )}
-                </ScrollView>
-            </KeyboardAvoidingView>
+
+                        {/* Note */}
+                        <TextInput
+                            style={styles.txNoteInput}
+                            value={pt.description}
+                            onChangeText={v => updateTransaction(pt.id, { description: v })}
+                            placeholder={t('add_note')}
+                            placeholderTextColor="#CBD5E1"
+                        />
+                    </Animated.View>
+                ))}
+
+                {parsedTransactions.length === 0 && (
+                    <View style={styles.emptyReview}>
+                        <Ionicons name="alert-circle-outline" size={48} color="#CBD5E1" />
+                        <Text style={styles.emptyReviewText}>{t('no_transactions_detected')}</Text>
+                    </View>
+                )}
+            </KeyboardAwareScrollView>
 
             {/* Footer */}
             <View style={[styles.reviewFooter, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
@@ -862,7 +860,11 @@ export default function VoiceTransaction() {
     /* ------------------------------------------------------------------ */
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
+        <KeyboardAvoidingView
+            style={[styles.container, { paddingTop: insets.top }]}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
             {/* Header */}
             <View style={styles.header}>
                 <View style={{ width: 40 }} />
@@ -878,7 +880,7 @@ export default function VoiceTransaction() {
             {phase === 'recording' && renderRecording()}
             {phase === 'processing' && renderProcessing()}
             {phase === 'review' && renderReview()}
-        </View>
+        </KeyboardAvoidingView>
     );
 }
 

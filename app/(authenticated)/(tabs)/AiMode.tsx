@@ -8,7 +8,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChatBubble } from '@/components/ChatBubble';
 import { useLanguage } from '@/context/LanguageContext';
 import { askFinancialAssistant } from '@/utils/aiApi';
-import { ChatSession, createChatSession, deleteChatSession, getChatHistory, getChatSessions, getPreferences, getTransactions, getWallets, Message, saveChatMessage, toggleChatSessionPin, updateChatSessionTitle } from '@/utils/storage';
+import { ChatSession, createChatSession, deleteChatSession, getCategories, getChatHistory, getChatSessions, getCurrency, getPreferences, getTransactions, getWalletBalance, getWallets, Message, saveChatMessage, toggleChatSessionPin, updateChatSessionTitle } from '@/utils/storage';
 
 const TypingDot = ({ delay }: { delay: number }) => {
     const isDark = useColorScheme() === 'dark';
@@ -296,7 +296,55 @@ const AiMode = () => {
             // Format for API
             const apiMessages = newMessagesOptimistic.map(m => ({ role: m.role, content: m.content }));
 
-            const response = await askFinancialAssistant(apiMessages, financialContext, abortController.signal);
+            // Fetch FRESH financial data right before calling the AI
+            const freshPrefs = await getPreferences();
+            const freshWallets = await getWallets();
+            const freshTx = await getTransactions();
+            const freshCurrency = await getCurrency();
+            const freshCategories = await getCategories() || [];
+
+            // Build lookup maps: ID → human-readable name
+            const categoryMap: Record<string, string> = {};
+            for (const cat of freshCategories) {
+                categoryMap[cat.id] = t(cat.name as any) || cat.name;
+            }
+            const walletMap: Record<string, string> = {};
+            for (const w of freshWallets) {
+                walletMap[w.id] = t(w.name as any) || w.name;
+            }
+
+            // Compute actual wallet balances (not just initialBalance)
+            const walletsWithBalance = await Promise.all(
+                freshWallets.map(async (w) => ({
+                    ...w,
+                    displayName: t(w.name as any) || w.name,
+                    currentBalance: await getWalletBalance(w.id),
+                }))
+            );
+
+            // Resolve category/wallet IDs to names on transactions
+            const resolvedTx = (freshTx || []).map(tx => ({
+                ...tx,
+                categoryName: tx.categoryId ? (categoryMap[tx.categoryId] || 'Uncategorized') : 'Uncategorized',
+                walletName: tx.walletId ? (walletMap[tx.walletId] || 'Unknown') : 'Unknown',
+            }));
+
+            // Resolve category limit IDs to names
+            const categoryLimits = freshPrefs.categoryLimits || {};
+            const resolvedCategoryLimits: Record<string, number> = {};
+            for (const [catId, limit] of Object.entries(categoryLimits)) {
+                const name = categoryMap[catId] || catId;
+                resolvedCategoryLimits[name] = limit as number;
+            }
+
+            const freshContext = {
+                budget: { ...freshPrefs, categoryLimits: resolvedCategoryLimits },
+                wallets: walletsWithBalance,
+                transactions: resolvedTx,
+                currency: freshCurrency,
+            };
+
+            const response = await askFinancialAssistant(apiMessages, freshContext, abortController.signal);
             const assistantMessage: Message = { role: 'assistant', content: response, sessionId: sessionId || undefined };
 
             // Save to DB immediately

@@ -8,6 +8,7 @@ export async function askFinancialAssistant(
         budget: any;
         wallets: any[];
         transactions: any[];
+        currency?: string;
     },
     signal?: AbortSignal
 ): Promise<string> {
@@ -17,18 +18,44 @@ export async function askFinancialAssistant(
         throw new Error('Missing EXPO_PUBLIC_OPENAI_API_KEY in .env');
     }
 
-    // Format the financial context
-    const walletsInfo = financialContext.wallets.map(w => `${w.name}: $${w.initialBalance}`).join(', ');
-    const budgetInfo = `Daily Limit: $${financialContext.budget.dailyLimit}, Monthly Limit: $${financialContext.budget.monthlyLimit}`;
+    const currency = financialContext.currency || 'USD';
 
-    // Summarize recent transactions
-    const recentTx = financialContext.transactions.map(tx =>
-        `[${tx.date.split('T')[0]}] ${tx.type === 'expense' ? '-' : '+'}$${tx.amount} for "${tx.title}" (Category ID: ${tx.categoryId || 'N/A'}, Wallet ID: ${tx.walletId || 'N/A'})`
+    // Format wallets with resolved display names and real balances
+    const walletsInfo = financialContext.wallets.map(w =>
+        `- ${w.displayName || w.name}: ${currency} ${w.currentBalance ?? w.initialBalance}`
     ).join('\n');
+
+    // Budget info
+    const budgetLines = [];
+    budgetLines.push(`Daily Spending Limit: ${financialContext.budget.dailyLimit ? `${currency} ${financialContext.budget.dailyLimit}` : 'Not set'}`);
+    budgetLines.push(`Monthly Budget: ${financialContext.budget.monthlyLimit ? `${currency} ${financialContext.budget.monthlyLimit}` : 'Not set'}`);
+
+    // Category-level limits
+    const categoryLimits = financialContext.budget.categoryLimits || {};
+    const catLimitEntries = Object.entries(categoryLimits).filter(([, v]) => (v as number) > 0);
+    if (catLimitEntries.length > 0) {
+        budgetLines.push('Category Limits:');
+        for (const [name, limit] of catLimitEntries) {
+            budgetLines.push(`  - ${name}: ${currency} ${limit}`);
+        }
+    }
+    const budgetInfo = budgetLines.join('\n');
+
+    // Format transactions with resolved category & wallet names
+    const recentTx = financialContext.transactions.map(tx => {
+        const dateStr = tx.date ? tx.date.split('T')[0] : 'Unknown date';
+        const sign = tx.type === 'expense' ? '-' : '+';
+        const cat = tx.categoryName || 'Uncategorized';
+        const wal = tx.walletName || 'Unknown wallet';
+        return `[${dateStr}] ${sign}${currency} ${tx.amount} "${tx.title}" | Category: ${cat} | Wallet: ${wal}`;
+    }).join('\n');
 
     const systemPrompt = `You are a helpful, expert personal finance AI assistant built into the 'Tracker' app.
 Your role is to help the user understand their financial situation.
 Do NOT use markdown to format responses. Provide your answer in plain text.
+The user's currency is ${currency}. Always use ${currency} when referring to monetary amounts.
+
+IMPORTANT: You must ONLY use the exact data provided below. Do NOT guess, estimate, or invent any numbers, names, or transactions. If the data does not contain enough information to answer, say so honestly.
 
 Here is the current financial context of the user:
 ---
@@ -38,13 +65,16 @@ ${budgetInfo}
 WALLETS:
 ${walletsInfo || 'No wallets configured.'}
 
-TRANSACTIONS:
-${recentTx || 'No recent transactions.'}
+RECENT TRANSACTIONS (${financialContext.transactions.length} total):
+${recentTx || 'No transactions recorded.'}
 ---
 
-Answer the user's question accurately based ONLY on this context. 
-Keep your response concise, friendly, and directly helpful.
-If the user asks about something outside of their finances or the Tracker app, gently steer them back to financial topics.`;
+Rules:
+1. Only reference transactions, wallets, and categories that appear in the data above.
+2. When calculating totals, use ONLY the transaction amounts listed — do not round or approximate.
+3. If the user asks about data you don't have, let them know.
+4. Keep your response concise, friendly, and directly helpful.
+5. If the user asks about something outside of their finances or the Tracker app, gently steer them back to financial topics.`;
 
     const apiMessages = [
         { role: 'system', content: systemPrompt },

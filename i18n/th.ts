@@ -234,7 +234,7 @@ const th: Record<string, string> = {
     // AI Mode
     ai_greeting: 'สวัสดี,',
     ai_help: 'วันนี้ให้ฉันช่วยจัดการการเงินเรื่องอะไรดี?',
-    check_budget: 'เช็คบัดเจทของฉัน',
+    check_budget: 'เช็คงบประมาณของฉัน',
     prompt_check_budget: 'ตอนนี้ฉันมีงบประมาณเหลือเท่าไหร่?',
     recent_expenses: 'รายจ่ายล่าสุด',
     prompt_recent_expenses: 'ขอดูรายจ่ายล่าสุดของฉันหน่อย',
@@ -274,7 +274,7 @@ const th: Record<string, string> = {
 
     // Picture Tracker
     picture_tracker: 'ติดตามด้วยรูปภาพ',
-    scan_receipt_desc: 'ถ่ายภาพใบเสร็จของคุณให้ชัดเจนเพื่อแยกรายการอัตโนมัติ',
+    scan_receipt_desc: 'ถ่ายภาพใบเสร็จของคุณให้ชัดเจนเพื่อบันทึกรายการอัตโนมัติ',
     take_photo: 'ถ่ายภาพ',
     gallery: 'อัลบั้ม',
     tips_good_results: 'เคล็ดลับเพื่อให้ได้ผลลัพธ์ที่ดี',
